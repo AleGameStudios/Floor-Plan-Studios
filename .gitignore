@@ -1,0 +1,21 @@
+# Dependencies and build output
+node_modules/
+dist/
+out/
+
+# Personal designs, settings and preferences bundled into local installers.
+# Only the README describing the folder is tracked.
+my-data/*
+!my-data/README.md
+
+# Archives, logs, local env
+*.zip
+*.log
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

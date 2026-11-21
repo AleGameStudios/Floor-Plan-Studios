@@ -1,0 +1,44 @@
+// Stroke icons, 24×24, drawn in currentColor.
+window.FP = window.FP || {};
+
+(function () {
+  const wrap = (d) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+  FP.icons = {
+    select: wrap('<path d="M5 3.5 18.5 10l-6 1.7-2.2 6.3z"/>'),
+    hand: wrap('<path d="M8 12V6.5a1.5 1.5 0 0 1 3 0V11m0-5.5V4.5a1.5 1.5 0 0 1 3 0V11m0-5a1.5 1.5 0 0 1 3 0v6.5m0-3.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1.6a6 6 0 0 1-4.6-2.2L4.3 14.6a1.5 1.5 0 0 1 2.3-1.9L8 14"/>'),
+    wall: wrap('<path d="M3 20V5h18"/><path d="M7 20V9h14" stroke-width="1.4"/>'),
+    room: wrap('<rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 12h7v8"/>'),
+    door: wrap('<path d="M4 20h16"/><path d="M6 20V6"/><path d="M6 6a14 14 0 0 1 14 14" stroke-dasharray="2 2.2"/>'),
+    window: wrap('<rect x="3" y="9" width="18" height="6" rx="1"/><path d="M3 12h18"/><path d="M12 9v6"/>'),
+    area: wrap('<path d="M4 17 8 5l12 3-2 11z"/><path d="M8 12h.01M12 15h.01M14 10h.01"/>'),
+    plant: wrap('<circle cx="12" cy="10" r="6.5"/><path d="M12 16.5V21M9 21h6"/><path d="M9.5 9.5a3 3 0 0 1 3-3"/>'),
+    item: wrap('<path d="M5 11V8a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v3"/><path d="M3 13a2 2 0 0 1 4 0v2h10v-2a2 2 0 0 1 4 0v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+    measure: wrap('<path d="m3 16 13-13 5 5L8 21z"/><path d="m7 12 2 2m1-5 2 2m1-5 2 2"/>'),
+    undo: wrap('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
+    redo: wrap('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>'),
+    sun: wrap('<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+    moon: wrap('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
+    auto: wrap('<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/>'),
+    sparkle: wrap('<path d="M12 3c.6 4.2 2.8 6.4 7 7-4.2.6-6.4 2.8-7 7-.6-4.2-2.8-6.4-7-7 4.2-.6 6.4-2.8 7-7z"/><path d="M19 16c.2 1.4.9 2.1 2.3 2.3-1.4.2-2.1.9-2.3 2.3-.2-1.4-.9-2.1-2.3-2.3 1.4-.2 2.1-.9 2.3-2.3z"/>'),
+    download: wrap('<path d="M12 4v11m-5-5 5 5 5-5"/><path d="M4 19h16"/>'),
+    plus: wrap('<path d="M12 5v14M5 12h14"/>'),
+    minus: wrap('<path d="M5 12h14"/>'),
+    fit: wrap('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
+    trash: wrap('<path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'),
+    copy: wrap('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
+    rotate: wrap('<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>'),
+    flip: wrap('<path d="M12 3v18"/><path d="M8 7 3 12l5 5zM16 7l5 5-5 5z"/>'),
+    eye: wrap('<path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z"/><circle cx="12" cy="12" r="3"/>'),
+    eyeOff: wrap('<path d="M3 3l18 18"/><path d="M10.6 5.1A9.9 9.9 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-3 3.9M6.6 6.6A17 17 0 0 0 2.5 12S6 19 12 19a9.5 9.5 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>'),
+    lock: wrap('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
+    unlock: wrap('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>'),
+    close: wrap('<path d="M6 6l12 12M18 6 6 18"/>'),
+    house: wrap('<path d="M3 10.5 12 4l9 6.5V20H3z"/><path d="M9 20v-6h6v6"/>'),
+    sofa: wrap('<path d="M5 11V8a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v3"/><path d="M3 13a2 2 0 0 1 4 0v2h10v-2a2 2 0 0 1 4 0v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+    image: wrap('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>'),
+    walk: wrap('<circle cx="13" cy="4.5" r="1.8"/><path d="M10 21l2-6 3 3v3"/><path d="M8 12l2-4h4l2 4 2 1"/><path d="M12 15l-1.5-7"/>'),
+    folder: wrap('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+    arrowLeft: wrap('<path d="M19 12H5m6-6-6 6 6 6"/>'),
+    leaf: wrap('<path d="M5 19c0-8 5-14 15-14 0 10-6 15-14 15"/><path d="M5 19 13 11"/>')
+  };
+})();

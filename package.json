@@ -1,0 +1,65 @@
+{
+  "name": "floorplan-studio",
+  "productName": "Floorplan Studio",
+  "version": "0.1.0",
+  "description": "Design house floor plans and the landscape of the whole plot, with live area stats and Claude-assisted illustrated renders.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis --x64",
+    "dist:mac": "electron-builder --mac dmg"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "^25.1.8",
+    "three": "0.158.0"
+  },
+  "author": "Floorplan Studio",
+  "build": {
+    "appId": "com.floorplanstudio.app",
+    "productName": "Floorplan Studio",
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "src/**/*",
+      "!src/_*"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Floorplan Studio",
+      "artifactName": "Floorplan-Studio-Setup-${version}.exe"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.png",
+      "category": "public.app-category.graphics-design"
+    },
+    "extraResources": [
+      {
+        "from": "my-data",
+        "to": "my-data"
+      }
+    ]
+  }
+}

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Floorplan Studio</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <button id="btnHome" class="icon-btn home-btn" title="Home: your designs (⇧⌘H)" aria-label="Home"></button>
+      <input id="projectName" class="project-name" spellcheck="false" aria-label="Project name">
+      <span id="saveState" class="save-state"></span>
+    </div>
+    <div class="seg" role="tablist" aria-label="View">
+      <button id="viewPlan" class="seg-btn active" role="tab" title="Plan view (⌘1)">Plan</button>
+      <button id="viewRender" class="seg-btn" role="tab" title="Render view (⌘2)">Render</button>
+      <button id="viewThree" class="seg-btn" role="tab" title="3D view (⌘3)">3D</button>
+    </div>
+    <div class="top-actions">
+      <button id="btnWalk" class="ghost-btn" title="Walk through the house in first person (W A S D)"><span class="i"></span>Walk</button>
+      <span class="divider"></span>
+      <button id="btnUndo" class="icon-btn" title="Undo (⌘Z)"></button>
+      <button id="btnRedo" class="icon-btn" title="Redo (⇧⌘Z)"></button>
+      <span class="divider"></span>
+      <button id="btnTheme" class="icon-btn" title="Theme"></button>
+      <button id="btnExport" class="ghost-btn" title="Export render as PNG (⌘E)"><span class="i"></span>Export</button>
+      <button id="btnClaude" class="accent-btn" title="Ask Claude to change, furnish or landscape the design"><span class="i"></span>Ask Claude</button>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <nav class="rail" id="rail" aria-label="Tools"></nav>
+    <aside class="drawer" id="drawer" hidden></aside>
+
+    <main class="stage" id="stage">
+      <div id="view3d" hidden></div>
+      <div class="optbar" id="optbar"></div>
+      <svg id="canvas" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMinYMin meet">
+        <g id="defs"></g>
+        <g id="scene"></g>
+        <g id="overlay"></g>
+      </svg>
+      <div class="hud" id="hud"></div>
+      <div class="walk-hud" id="walkHud" hidden></div>
+      <div class="zoom" aria-label="Zoom">
+        <select id="snapSel" class="snap-sel" title="Snap step for drawing and moving. Hold Alt to ignore it."></select>
+        <span class="divider"></span>
+        <button id="zoomOut" class="icon-btn" title="Zoom out (−)"></button>
+        <button id="zoomLabel" class="zoom-label" title="Reset to 100%">100%</button>
+        <button id="zoomIn" class="icon-btn" title="Zoom in (+)"></button>
+        <span class="divider"></span>
+        <button id="zoomFit" class="icon-btn" title="Zoom to fit (⌘0)"></button>
+      </div>
+    </main>
+
+    <aside class="side">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="inspector">Inspector</button>
+        <button class="tab" data-tab="stats">Areas</button>
+        <button class="tab" data-tab="layers">Layers</button>
+      </div>
+      <div class="side-body" id="sideBody"></div>
+    </aside>
+  </div>
+
+  <div class="home" id="home" hidden></div>
+  <div class="modal-back" id="modal" hidden></div>
+  <div class="toast" id="toast" hidden></div>
+  <input type="file" id="fileInput" accept=".fplan,.json" hidden>
+
+  <script src="catalog.js"></script>
+  <script src="geom.js"></script>
+  <script src="model.js"></script>
+  <script src="sample.js"></script>
+  <script src="draw.js"></script>
+  <script src="icons.js"></script>
+  <script src="editor.js"></script>
+  <script src="vendor/three.min.js"></script>
+  <script src="post3d.js"></script>
+  <script src="furniture3d.js"></script>
+  <script src="view3d.js"></script>
+  <script src="claude.js"></script>
+  <script src="panels.js"></script>
+  <script src="home.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
