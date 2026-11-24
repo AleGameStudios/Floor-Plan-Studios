@@ -51,7 +51,10 @@ function buildMenu() {
         { type: 'separator' },
         { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
         { label: 'Duplicate', accelerator: 'CmdOrCtrl+D', click: () => send('duplicate') },
-        { role: 'selectAll' }
+        { type: 'separator' },
+        { label: 'Select all', accelerator: 'CmdOrCtrl+A', click: () => send('selectAll') },
+        { label: 'Group', accelerator: 'CmdOrCtrl+G', click: () => send('group') },
+        { label: 'Ungroup', accelerator: 'Shift+CmdOrCtrl+G', click: () => send('ungroup') }
       ]
     },
     {
@@ -256,12 +259,25 @@ async function resolveClaude() {
   }
   return null;
 }
-// How to start the CLI. An npm install on Windows is a .cmd shim, which can't be started without a shell
-// (and shell quoting would mangle the JSON arguments), so run its script with Electron's own Node instead.
+// How to start the CLI. An npm install on Windows is a .cmd shim, and Node refuses to start .cmd/.bat files
+// without a shell (spawn EINVAL), where shell quoting would also mangle the JSON arguments. So read the shim,
+// find what it really launches (a native claude.exe in newer installs, a cli.js in older ones) and start that.
 function claudeCommand(bin) {
   if (isWin && /\.(cmd|bat)$/i.test(bin)) {
-    const script = path.join(path.dirname(bin), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
-    if (fs.existsSync(script)) return { file: process.execPath, pre: [script], env: { ELECTRON_RUN_AS_NODE: '1' } };
+    const dir = path.dirname(bin);
+    let text = '';
+    try { text = fs.readFileSync(bin, 'utf8'); } catch (e) { /* unreadable shim: fall back to guesses below */ }
+    const targets = [];
+    const re = /%dp0%\\([^"\r\n]+?\.(?:exe|js))"/ig;
+    let m;
+    while ((m = re.exec(text))) if (!/(^|\\)node\.exe$/i.test(m[1])) targets.push(path.join(dir, m[1]));
+    const pkg = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code');
+    targets.push(path.join(pkg, 'bin', 'claude.exe'), path.join(pkg, 'cli.js'));
+    for (const t of targets) {
+      if (!fs.existsSync(t)) continue;
+      if (/\.exe$/i.test(t)) return { file: t, pre: [], env: {} };
+      return { file: process.execPath, pre: [t], env: { ELECTRON_RUN_AS_NODE: '1' } };
+    }
   }
   return { file: bin, pre: [], env: {} };
 }
@@ -281,7 +297,13 @@ function childEnv(PATH) {
 function runProcess(bin, args, input, timeoutMs) {
   return loginShellPath().then((PATH) => new Promise((resolve) => {
     const cmd = claudeCommand(bin);
-    const child = spawn(cmd.file, cmd.pre.concat(args), { cwd: os.tmpdir(), env: Object.assign(childEnv(PATH), cmd.env), windowsHide: true });
+    let child;
+    try {
+      child = spawn(cmd.file, cmd.pre.concat(args), { cwd: os.tmpdir(), env: Object.assign(childEnv(PATH), cmd.env), windowsHide: true });
+    } catch (e) {
+      resolve({ code: -1, out: '', err: 'Could not start Claude Code (' + cmd.file + '): ' + e.message + '. Set its full path to claude.exe in Settings, or reinstall Claude Code.' });
+      return;
+    }
     claudeChild = child;
     let out = '', err = '', done = false;
     const finish = (r) => { if (done) return; done = true; clearTimeout(timer); claudeChild = null; resolve(r); };
@@ -374,6 +396,57 @@ ipcMain.handle('claude:run', async (_e, req) => {
   const data = env.structured_output || extractJson(env.result);
   if (!data) return { ok: false, error: 'Claude replied, but not with the expected JSON.', raw: String(env.result || '').slice(0, 4000) };
   return { ok: true, data, ms: env.duration_ms };
+});
+
+// Sign in from inside the app: runs "claude auth login" (the CLI opens the browser and waits for the sign-in).
+// Subscription login only (--claudeai), the same rule the status check enforces.
+let loginChild = null;
+const LOGIN_HOSTS = /(^|\.)(claude\.ai|claude\.com|anthropic\.com)$/i;
+function safeExternal(u) {
+  try { const x = new URL(u); return x.protocol === 'https:' && LOGIN_HOSTS.test(x.hostname) ? x.toString() : null; } catch (e) { return null; }
+}
+ipcMain.handle('claude:login', async () => {
+  const bin = await resolveClaude();
+  if (!bin) return { ok: false, error: 'Claude Code was not found. Install it, or set its path in Settings.' };
+  if (loginChild) return { ok: false, error: 'A sign-in is already in progress.' };
+  const PATH = await loginShellPath();
+  const attempt = (args) => new Promise((resolve) => {
+    const cmd = claudeCommand(bin);
+    let child;
+    try {
+      child = spawn(cmd.file, cmd.pre.concat(args), { cwd: os.tmpdir(), env: Object.assign(childEnv(PATH), cmd.env), windowsHide: true });
+    } catch (e) { resolve({ code: -1, out: '', err: 'Could not start Claude Code: ' + e.message }); return; }
+    loginChild = child;
+    let out = '', err = '', sent = false, done = false;
+    const finish = (r) => { if (done) return; done = true; clearTimeout(timer); loginChild = null; resolve(r); };
+    const timer = setTimeout(() => { child.kill('SIGTERM'); finish({ code: -1, out, err: 'Timed out waiting for the sign-in (5 minutes).' }); }, 5 * 60 * 1000);
+    const watch = (d) => {
+      out += d;
+      if (sent || !win) return;
+      const m = /https:\/\/[^\s"'<>]+/.exec(out);
+      const u = m && safeExternal(m[0]);
+      if (u) { sent = true; win.webContents.send('claude:loginUrl', u); }
+    };
+    child.stdout.on('data', watch);
+    child.stderr.on('data', (d) => { err += d; watch(d); });
+    child.on('error', (e) => finish({ code: -1, out, err: e.message }));
+    child.on('close', (code, signal) => finish({ code, out, err: signal === 'SIGTERM' && !err ? 'Cancelled.' : err }));
+    child.stdin.end();
+  });
+  let r = await attempt(['auth', 'login', '--claudeai']);
+  if (r.code !== 0 && /unknown option|unrecognized|unexpected argument/i.test(r.err + r.out)) r = await attempt(['auth', 'login']);
+  if (r.code === 0) return { ok: true };
+  return { ok: false, error: (r.err || r.out || 'Sign-in did not finish.').trim().slice(0, 1200) };
+});
+ipcMain.handle('claude:loginCancel', () => {
+  if (loginChild) { loginChild.kill('SIGTERM'); return true; }
+  return false;
+});
+ipcMain.handle('app:openExternal', (_e, u) => {
+  const safe = safeExternal(u);
+  if (!safe) return false;
+  shell.openExternal(safe);
+  return true;
 });
 
 ipcMain.handle('claude:cancel', () => {

@@ -7,7 +7,8 @@ window.FP = window.FP || {};
   const M = FP.model, G = FP.geom, C = FP.catalog;
   const A = () => FP.app;
   const S = () => FP.app.state;
-  const LAYER_OF = { wall: 'house', opening: 'house', room: 'house', item: 'furniture', area: 'landscape', plant: 'landscape' };
+  const isSite = (it) => (C.items[it.kind] || {}).layer === 'landscape';
+  const LAYER_OF = { wall: 'house', opening: 'house', room: 'house', item: 'furniture', area: 'landscape', plant: 'landscape', fence: 'landscape', gate: 'landscape' };
   const BODY = 0.22;
   const FLOOR = 0.04; // finished floor level; ground surfaces sit just above 0, furniture on the floor
 
@@ -17,6 +18,7 @@ window.FP = window.FP || {};
   // Person: eye level is about 11 cm below the top of the head; pace is a normal indoor stroll.
   let personH = pref('fp.height', 1.72, 1.2, 2.2);
   let pace = pref('fp.pace', 1.2, 0.6, 2.5);
+  let look = pref('fp.look', 1, 0.2, 3); // mouse-look speed multiplier
   // Lens: "wide" is a Panini projection (very wide view, edges not stretched); "normal" is a plain camera lens.
   let lens = 'wide';
   try { if (localStorage.getItem('fp.lens') === 'normal') lens = 'normal'; } catch (e) { /* storage unavailable */ }
@@ -357,6 +359,22 @@ window.FP = window.FP || {};
     } },
     bark: { m: 1, draw(g, s, r, u, k) { g.fillStyle = '#e8e8e8'; g.fillRect(0, 0, s, s); for (let i = 0; i < 120 * k; i++) { g.fillStyle = 'rgba(60,60,60,.25)'; g.fillRect(r() * s, r() * s, 1.5 * u, (10 + r() * 30) * u); } } }
   };
+  // Paths and roads described in the catalog share their layout with the plan render (FP.draw.groundTile).
+  for (const [gk, gm] of Object.entries(C.materials)) {
+    if (!gm.tex) continue;
+    GROUND[gk] = gm.flat;
+    ROUGH[gk] = [gm.tex.t === 'speckle' && gk === 'asphalt' ? 0.9 : 0.85];
+    if (gm.tex.t !== 'speckle') RELIEF[gk] = gm.tex.t === 'cobble' ? 3 : 1.5;
+    TEX[gk] = { m: gm.tex.size, draw(g, s) {
+      const t = FP.draw.groundTile(gk), px = s / t.size;
+      g.fillStyle = t.base; g.fillRect(0, 0, s, s);
+      for (const sh of t.shapes) {
+        g.fillStyle = sh.c;
+        if (sh.k === 'r') g.fillRect(sh.x * px, sh.y * px, sh.w * px, sh.h * px);
+        else { g.beginPath(); g.ellipse(sh.x * px, sh.y * px, sh.rx * px, sh.ry * px, 0, 0, 7); g.fill(); }
+      }
+    } };
+  }
   function tex(key, base) {
     const ck = key + '|' + (base || '');
     if (texs.has(ck)) return texs.get(ck);
@@ -821,8 +839,8 @@ window.FP = window.FP || {};
         }
       }
     } else {
-      const b = M.roofBounds(p);
-      if (b) g.add(pitched(b, H, R, top, ext, st));
+      // one roof per building, each shaped by its own footprint
+      for (const bld of M.roofGroups(p)) g.add(pitched(bld.bounds, H, R, top, ext, st));
     }
     // ceilings, painted and lit by downlights
     const ceil = mat(st.ceiling, { roughness: 0.95, side: T.BackSide });
@@ -933,7 +951,7 @@ window.FP = window.FP || {};
     g.rotation.y = (-(it.rot || 0) * Math.PI) / 180;
     tag(shadows(g), 'item', it.id);
     // soft contact shadow on the floor under the piece
-    if (quality && it.kind !== 'rug') {
+    if (quality && it.kind !== 'rug' && !(C.items[it.kind] || {}).big) {
       const x = it.w / 2 + 0.12, z = it.h / 2 + 0.12, y = 0.003;
       g.add(shadeQuad([-x, y, -z], [x, y, -z], [x, y, z], [-x, y, z], BLOB()));
     }
@@ -952,6 +970,173 @@ window.FP = window.FP || {};
     }
     g.position.set(pl.x, 0, pl.y);
     return tag(shadows(g), 'plant', pl.id);
+  }
+
+  /* ---------- fences ---------- */
+  // Built along local +x from the fence's start, then turned to face the way it runs.
+  // Large: posts, a solid run of upright boards, a top cap and a gravel board.
+  // Picket: pointed white pickets on two rails between square posts with caps.
+  function picketShape(h) {
+    const s = new T.Shape(), w = 0.035, tip = Math.min(0.06, h * 0.2);
+    s.moveTo(-w, 0); s.lineTo(w, 0); s.lineTo(w, h - tip); s.lineTo(0, h); s.lineTo(-w, h - tip); s.closePath();
+    const g = new T.ExtrudeGeometry(s, { depth: 0.022, bevelEnabled: false });
+    g.translate(0, 0, -0.011);
+    return g;
+  }
+  function instanced(geo, material, n, place) {
+    const m = new T.InstancedMesh(geo, material, Math.max(1, n));
+    const o = new T.Object3D();
+    for (let i = 0; i < n; i++) { place(o, i); o.updateMatrix(); m.setMatrixAt(i, o.matrix); }
+    m.count = n;
+    m.instanceMatrix.needsUpdate = true;
+    return m;
+  }
+  function fenceRun(fe, L) {
+    const d = C.fences[fe.kind] || C.fences.large, h = fe.h || d.h, col = fe.color || d.color;
+    const g = new T.Group();
+    const spacing = fe.kind === 'picket' ? 1.8 : 2.4, n = Math.max(1, Math.round(L / spacing));
+    if (fe.kind === 'picket') {
+      const body = mat(col, { roughness: 0.6 });
+      const pw = 0.09;
+      for (let i = 0; i <= n; i++) {
+        const x = (L * i) / n;
+        g.add(B(x - pw / 2, x + pw / 2, 0, h + 0.05, -pw / 2, pw / 2, body));
+        g.add(B(x - pw * 0.65, x + pw * 0.65, h + 0.05, h + 0.08, -pw * 0.65, pw * 0.65, body)); // post cap
+      }
+      g.add(B(0, L, h * 0.2, h * 0.2 + 0.04, -0.055, -0.025, body));
+      g.add(B(0, L, h * 0.72, h * 0.72 + 0.04, -0.055, -0.025, body));
+      const pitch = 0.105, count = Math.max(1, Math.floor((L - 0.1) / pitch));
+      const pad = (L - count * pitch) / 2 + pitch / 2;
+      g.add(instanced(picketShape(h * 0.96), body, count, (o, i) => { o.position.set(pad + i * pitch, h * 0.04, -0.005); o.rotation.set(0, 0, 0); o.scale.set(1, 1, 1); }));
+    } else {
+      const wood = mat(col, { roughness: 0.9 }), post = mat(toneHex(col, -0.28), { roughness: 0.9 }), cap = mat(toneHex(col, -0.15), { roughness: 0.9 });
+      const pw = 0.13;
+      for (let i = 0; i <= n; i++) {
+        const x = (L * i) / n;
+        g.add(B(x - pw / 2, x + pw / 2, 0, h + 0.07, -pw / 2, pw / 2, post));
+        g.add(B(x - pw * 0.62, x + pw * 0.62, h + 0.07, h + 0.1, -pw * 0.62, pw * 0.62, cap));
+      }
+      const pitch = 0.15, count = Math.max(1, Math.floor(L / pitch)), pad = (L - count * pitch) / 2 + pitch / 2;
+      g.add(B(0, L, 0.12, h - 0.1, -0.012, 0.012, post)); // backing, so no light shows between boards
+      g.add(instanced(new T.BoxGeometry(0.14, h - 0.2, 0.04), wood, count, (o, i) => { o.position.set(pad + i * pitch, 0.12 + (h - 0.2) / 2, 0); o.rotation.set(0, 0, 0); o.scale.set(1, 1, 1); }));
+      g.add(B(0, L, h - 0.1, h + 0.0, -0.06, 0.06, cap));          // top rail
+      g.add(B(0, L, 0, 0.14, -0.035, 0.035, post));              // gravel board
+    }
+    return g;
+  }
+
+  // A fence is built in stretches between its gates.
+  function buildFence(p, fe) {
+    const L = Math.hypot(fe.x2 - fe.x1, fe.y2 - fe.y1), g = new T.Group();
+    if (L < 0.02) return tag(g, 'fence', fe.id);
+    let spans = [[0, L]];
+    for (const gt of p.gates || []) {
+      if (gt.fence !== fe.id) continue;
+      const q = M.gateGeo(p, gt);
+      if (q) spans = G.subtract(spans, q.from, q.to);
+    }
+    for (const [a, b] of spans) {
+      if (b - a < 0.12) continue;
+      const run = fenceRun(fe, b - a);
+      run.position.x = a;
+      g.add(run);
+    }
+    g.position.set(fe.x1, 0, fe.y1);
+    g.rotation.y = -Math.atan2(fe.y2 - fe.y1, fe.x2 - fe.x1);
+    return tag(shadows(g), 'fence', fe.id);
+  }
+
+  // A gate, closed, in the fence's own frame: x along the fence, z across it (the swing side is +z when swing is 1).
+  function buildGate(p, gt) {
+    const geo = M.gateGeo(p, gt);
+    if (!geo) return null;
+    const fe = geo.fence, d = C.gates[gt.kind] || C.gates.garden, col = gt.color || d.color, h = gt.h || d.h;
+    const sw = gt.swing === -1 ? -1 : 1, g = new T.Group();
+    const metal = d.style === 'bars' || d.style === 'mesh' || d.style === 'rails' || d.style === 'slats';
+    const body = mat(col, { roughness: metal ? 0.45 : 0.85, metalness: metal ? 0.45 : 0 });
+    const dark = mat(toneHex(col, -0.3), { roughness: metal ? 0.5 : 0.9, metalness: metal ? 0.4 : 0 });
+    const post = mat(d.style === 'picket' ? col : toneHex(col, -0.45), { roughness: 0.7, metalness: metal ? 0.3 : 0 });
+    const from = geo.from, to = geo.to;
+    // posts and caps
+    for (const x of [from, to]) {
+      g.add(B(x - 0.085, x + 0.085, 0, h + 0.1, -0.085, 0.085, post));
+      g.add(B(x - 0.105, x + 0.105, h + 0.1, h + 0.13, -0.105, 0.105, post));
+    }
+    const brace = (x0, x1, ya, yb, zc, m) => {
+      const len = Math.hypot(x1 - x0, yb - ya), bm = new T.Mesh(new T.BoxGeometry(len, 0.07, 0.022), m);
+      bm.position.set((x0 + x1) / 2, (ya + yb) / 2, zc);
+      bm.rotation.z = Math.atan2(yb - ya, x1 - x0);
+      g.add(bm);
+    };
+    const leaf = (x0, x1, zc) => {
+      const w = x1 - x0, y0 = 0.1, top = h;
+      switch (d.style) {
+        case 'boards': {
+          const n = Math.max(3, Math.round(w / 0.14)), bw = w / n;
+          for (let i = 0; i < n; i++) g.add(B(x0 + i * bw + 0.004, x0 + (i + 1) * bw - 0.004, y0, top - 0.02, zc - 0.018, zc + 0.018, body));
+          g.add(B(x0, x1, top - 0.2, top - 0.12, zc - 0.038, zc - 0.018, dark), B(x0, x1, y0 + 0.06, y0 + 0.14, zc - 0.038, zc - 0.018, dark));
+          brace(x0 + 0.03, x1 - 0.03, y0 + 0.1, top - 0.16, zc - 0.045, dark);
+          break;
+        }
+        case 'picket': {
+          const geoP = picketShape(top * 0.96), pitch = 0.105, n = Math.max(2, Math.floor(w / pitch)), step = w / n;
+          for (let i = 0; i < n; i++) { const m = new T.Mesh(geoP, body); m.position.set(x0 + (i + 0.5) * step, top * 0.04, zc); g.add(m); }
+          g.add(B(x0, x1, top * 0.22, top * 0.22 + 0.04, zc - 0.05, zc - 0.02, body), B(x0, x1, top * 0.7, top * 0.7 + 0.04, zc - 0.05, zc - 0.02, body));
+          break;
+        }
+        case 'arched': {
+          const arch = Math.min(0.22, w * 0.25), s = new T.Shape();
+          s.moveTo(x0, y0); s.lineTo(x1, y0); s.lineTo(x1, top - arch); s.quadraticCurveTo((x0 + x1) / 2, top + arch, x0, top - arch); s.closePath();
+          const eg = new T.ExtrudeGeometry(s, { depth: 0.04, bevelEnabled: false });
+          eg.translate(0, 0, zc - 0.02);
+          g.add(new T.Mesh(eg, body));
+          const n = Math.max(3, Math.round(w / 0.16));
+          for (let i = 1; i < n; i++) g.add(B(x0 + (w * i) / n - 0.006, x0 + (w * i) / n + 0.006, y0, top - arch - 0.02, zc + 0.02, zc + 0.026, dark));
+          g.add(B(x0, x1, top * 0.3, top * 0.3 + 0.07, zc + 0.02, zc + 0.032, dark), B(x0, x1, top * 0.62, top * 0.62 + 0.07, zc + 0.02, zc + 0.032, dark));
+          break;
+        }
+        case 'rails': {
+          for (let i = 0; i < 5; i++) { const yb = 0.2 + (i * (top - 0.32)) / 4; g.add(B(x0, x1, yb, yb + 0.06, zc - 0.025, zc + 0.025, body)); }
+          for (const x of [x0 + 0.03, (x0 + x1) / 2, x1 - 0.03]) g.add(B(x - 0.03, x + 0.03, y0, top, zc - 0.03, zc + 0.03, body));
+          brace(x0 + 0.03, x1 - 0.03, 0.2, top - 0.05, zc + 0.04, body);
+          break;
+        }
+        case 'bars': {
+          const n = Math.max(4, Math.round(w / 0.11)), step = w / n, tip = new T.ConeGeometry(0.028, 0.08, 6);
+          for (let i = 0; i <= n; i++) {
+            const x = x0 + i * step;
+            g.add(B(x - 0.011, x + 0.011, y0, top - 0.02, zc - 0.011, zc + 0.011, body));
+            const m = new T.Mesh(tip, body); m.position.set(x, top + 0.02, zc); g.add(m);
+          }
+          g.add(B(x0, x1, top - 0.09, top - 0.03, zc - 0.02, zc + 0.02, body), B(x0, x1, y0 + 0.1, y0 + 0.16, zc - 0.02, zc + 0.02, body), B(x0, x1, top * 0.5, top * 0.5 + 0.04, zc - 0.02, zc + 0.02, body));
+          break;
+        }
+        case 'slats': {
+          const n = Math.max(4, Math.floor((top - y0) / 0.11)), step = (top - y0) / n;
+          for (let i = 0; i < n; i++) g.add(B(x0, x1, y0 + i * step + 0.01, y0 + (i + 1) * step - 0.01, zc - 0.02, zc + 0.02, body));
+          g.add(B(x0, x0 + 0.05, y0, top, zc - 0.035, zc + 0.035, dark), B(x1 - 0.05, x1, y0, top, zc - 0.035, zc + 0.035, dark));
+          break;
+        }
+        default: { // mesh
+          for (let x = x0 + 0.1; x < x1 - 0.02; x += 0.1) g.add(B(x - 0.004, x + 0.004, y0, top, zc - 0.004, zc + 0.004, dark));
+          for (let y = y0 + 0.1; y < top - 0.02; y += 0.1) g.add(B(x0, x1, y - 0.004, y + 0.004, zc - 0.004, zc + 0.004, dark));
+          g.add(B(x0, x1, y0, y0 + 0.04, zc - 0.015, zc + 0.015, body), B(x0, x1, top - 0.04, top, zc - 0.015, zc + 0.015, body), B(x0, x0 + 0.04, y0, top, zc - 0.015, zc + 0.015, body), B(x1 - 0.04, x1, y0, top, zc - 0.015, zc + 0.015, body));
+        }
+      }
+    };
+    const mid = (from + to) / 2;
+    if (d.slide) {
+      leaf(from + 0.1, to - 0.1, 0.11 * sw);
+      g.add(B(from - 0.05, to + 0.05, 0, 0.05, 0.11 * sw - 0.05, 0.11 * sw + 0.05, post));
+    } else if (d.leaves === 2) {
+      leaf(from + 0.1, mid - 0.012, 0);
+      leaf(mid + 0.012, to - 0.1, 0);
+    } else {
+      leaf(from + 0.1, to - 0.1, 0);
+    }
+    g.position.set(fe.x1, 0, fe.y1);
+    g.rotation.y = -Math.atan2(fe.y2 - fe.y1, fe.x2 - fe.x1);
+    return tag(shadows(g), 'gate', gt.id);
   }
 
   /* ---------- whole scene ---------- */
@@ -977,6 +1162,9 @@ window.FP = window.FP || {};
         root.add(tag(m, 'area', a.id));
       });
       for (const pl of p.plants) root.add(buildPlant(pl));
+      for (const it of p.items) if (isSite(it)) root.add(buildItem(it));
+      for (const fe of p.fences || []) root.add(buildFence(p, fe));
+      for (const gt of p.gates || []) { const gg = buildGate(p, gt); if (gg) root.add(gg); }
     }
     if (L.house.visible) {
       for (const r of p.rooms) root.add(tag(flat(r.pts, floorMat(r), FLOOR), 'room', r.id));
@@ -986,7 +1174,7 @@ window.FP = window.FP || {};
       rf.name = 'roof';
       root.add(rf);
     }
-    if (L.furniture.visible) for (const it of p.items) root.add(buildItem(it));
+    if (L.furniture.visible) for (const it of p.items) if (!isSite(it)) root.add(buildItem(it));
     scene.add(root);
     buildCollision(p, H);
     placeSun(p);
@@ -1072,6 +1260,13 @@ window.FP = window.FP || {};
   // Solid wall stretches the walker can't pass. Doorways and passages taller than 1.8 m are open.
   function buildCollision(p, H) {
     collide = [];
+    for (const fe of p.fences || []) {
+      // gates are walked through, so only the stretches between them block
+      const v = M.wallVec(fe);
+      let iv = [[0, v.L]];
+      for (const gt of p.gates || []) { if (gt.fence !== fe.id) continue; const q = M.gateGeo(p, gt); if (q) iv = G.subtract(iv, q.from, q.to); }
+      for (const [a, b] of iv) if (b - a > 0.02) collide.push({ a: { x: v.a.x + v.ux * a, y: v.a.y + v.uy * a }, b: { x: v.a.x + v.ux * b, y: v.a.y + v.uy * b }, t: 0.05 });
+    }
     for (const w of p.walls) {
       const v = M.wallVec(w);
       let iv = [[0, v.L]];
@@ -1195,6 +1390,7 @@ window.FP = window.FP || {};
     box.append(b, document.createTextNode('  ' + line));
   }
   function setPerson(h) { personH = Math.max(1.2, Math.min(2.2, h)); save('fp.height', personH); dirty = true; }
+  function setLook(v) { look = Math.max(0.2, Math.min(3, v)); save('fp.look', look); }
   function setPace(v) { pace = Math.max(0.6, Math.min(2.5, v)); save('fp.pace', pace); }
 
   function exitWalk() {
@@ -1213,7 +1409,16 @@ window.FP = window.FP || {};
     applyOrbit();
     FP.panels.updateTool();
   }
-  function requestLock() { try { const r = renderer.domElement.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) { /* not available */ } }
+  // Ask for raw mouse input (no Windows pointer acceleration or smoothing, which is what makes the view fly around
+  // on PC); fall back to a plain lock where the platform cannot give raw input.
+  function requestLock() {
+    const cv = renderer.domElement;
+    const plain = () => { try { const r = cv.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) { /* not available */ } };
+    try {
+      const r = cv.requestPointerLock({ unadjustedMovement: true });
+      if (r && r.catch) r.catch(plain);
+    } catch (e) { plain(); }
+  }
   const LENS_TILT = 0.55; // looking further up or down than this tilts the camera too
   function stepWalk(dt) {
     const k = walk.keys;
@@ -1250,7 +1455,8 @@ window.FP = window.FP || {};
   function pickable(h) {
     const k = h.object.userData.k;
     if (k === 'ground') return false;
-    const layer = S().layers[LAYER_OF[k]];
+    const it = k === 'item' ? M.find(FP.app.shownProject(), 'item', h.object.userData.id) : null;
+    const layer = S().layers[it && isSite(it) ? 'landscape' : LAYER_OF[k]];
     return !!layer && layer.visible && !layer.locked;
   }
   function planeHit(e, plane) {
@@ -1273,8 +1479,8 @@ window.FP = window.FP || {};
     if ((st.tool === 'item' || st.tool === 'plant') && floorHit) {
       const pt = floorHit.point;
       if (st.tool === 'item') {
-        const d = C.items[st.opts.item];
-        const it = { id: M.uid('i'), kind: st.opts.item, x: G.round(G.snap(pt.x, 0.05)), y: G.round(G.snap(pt.z, 0.05)), w: d.w, h: d.h, rot: st.opts.itemRot || 0 };
+        const d = C.items[st.opts.item], sz = st.opts.itemSize[st.opts.item] || [d.w, d.h];
+        const it = { id: M.uid('i'), kind: st.opts.item, x: G.round(G.snap(pt.x, 0.05)), y: G.round(G.snap(pt.z, 0.05)), w: sz[0], h: sz[1], rot: st.opts.itemRot || 0 };
         A().mutate((p) => p.items.push(it));
         A().select({ k: 'item', id: it.id });
       } else {
@@ -1368,10 +1574,17 @@ window.FP = window.FP || {};
     applyOrbit();
   }
 
+  // Mouse look. Chromium on Windows reports one huge jump when the pointer lock starts or the cursor is
+  // re-centred, which spins the view; ignore input for a moment after locking and drop any single impossible jump.
+  let lockedAt = 0;
+  const LOOK_RAD = 0.0018; // radians per pixel at speed 1
   function onMouseLook(e) {
     if (!walk.on || !walk.locked) return;
-    walk.yaw -= e.movementX * 0.0022;
-    walk.pitch = Math.max(-1.35, Math.min(1.35, walk.pitch - e.movementY * 0.0022));
+    if (performance.now() - lockedAt < 250) return;
+    let dx = e.movementX || 0, dy = e.movementY || 0;
+    if (Math.abs(dx) > 250 || Math.abs(dy) > 250) return;
+    walk.yaw -= dx * LOOK_RAD * look;
+    walk.pitch = Math.max(-1.35, Math.min(1.35, walk.pitch - dy * LOOK_RAD * look));
     dirty = true;
   }
   function onKey(e, down) {
@@ -1422,7 +1635,7 @@ window.FP = window.FP || {};
     document.addEventListener('mousemove', onMouseLook);
     document.addEventListener('keydown', (e) => onKey(e, true));
     document.addEventListener('keyup', (e) => onKey(e, false));
-    document.addEventListener('pointerlockchange', () => { walk.locked = document.pointerLockElement === cv; FP.panels.updateTool(); });
+    document.addEventListener('pointerlockchange', () => { walk.locked = document.pointerLockElement === cv; if (walk.locked) lockedAt = performance.now(); FP.panels.updateTool(); });
     new ResizeObserver(resize).observe(host);
     resize();
     return true;
@@ -1531,7 +1744,7 @@ window.FP = window.FP || {};
   FP.view3d = {
     show, hide, rebuild, syncSelection, fit, zoom, startWalk, exitWalk, setRoof, screenshot, screenOf,
     setQuality, sizeOf, quality: () => quality, setFov, fov: fovNow,
-    setPerson, person: () => personH, setPace, pace: () => pace,
+    setPerson, person: () => personH, setPace, pace: () => pace, setLook, look: () => look,
     lens: () => lens, setLens(v) { lens = v === 'normal' ? 'normal' : 'wide'; save('fp.lens', lens); dirty = true; },
     feel: () => feel, setFeel(v) { feel = Math.max(1, Math.min(1.5, Math.round(v * 20) / 20)); save('fp.feel', feel); dirty = true; },
     straight: () => straight, setStraight(v) { straight = !!v; save('fp.straight', straight ? 1 : 0); dirty = true; },

@@ -20,11 +20,14 @@
 
 ## Features
 
-- **Plan editor** – walls, rooms, doors, windows, furniture, ground surfaces (paths, driveway, beds, hedges, pools) and plants, with snapping to corners, walls and grid.
+- **Plan editor** – walls, rooms, doors, windows, furniture, ground surfaces (23 materials, 15 of them path and road surfaces such as asphalt, concrete, gravel, crushed stone, decomposed granite, cobblestone, granite setts, brick, flagstone, sandstone, pavers, terracotta and grass pavers, plus lawn, beds, hedges, decks and pools), plants, fences (large boundary fences and low white picket fences, each with an adjustable height) and **gates** (ten kinds, from pedestrian and double drive gates to sliding, cantilever and picket gates, which sit in a fence and cut an opening in it), with snapping to corners, walls and grid.
+- **Backyard builder** – swimming, oval, kidney, plunge pools, a hot tub, a quincho (BBQ pavilion), a built-in parrilla, a soccer field and full or half basketball courts. Pick one in the Backyard drawer (P), set its width and depth, place it on the lot, then select it to resize or rotate it any time.
+- **Select many, group and move** – drag a box on empty ground to select several things (left to right takes what is fully inside, right to left takes anything it touches), Shift-click or Ctrl-click to add or remove one, Ctrl+A for everything. Drag any selected part to move the lot, type an exact position, rotate 90° (`[` `]`), duplicate or delete them together. **Group** (Ctrl+G) keeps them together, saved with the design, so one click selects and moves the whole group; Ungroup is Ctrl+Shift+G. "Select whole house" on a room picks up its walls, doors, windows, furniture and plants.
 - **Live area stats** – m² per room, usable and built totals, covered areas, lot coverage, lawn and surfaces by material. Room sizes are clear floor between wall faces.
+- **Import a house** – bring a house you designed in another design onto this plot: tell Claude where it goes and which way it faces (or set the position and turn yourself), preview it, then apply.
 - **Illustrated render** – a top-down render drawn to exact proportions (floors, lawn, pool, trees, furniture, shadows, dimension lines). Export as PNG or SVG.
-- **3D view** – built from the plan. Orbit with the roof on or off, click to select, drag furniture across the floor and doors/windows along their wall.
-- **First-person walk** – W A S D, mouse look, Shift to run, wall collision and walkable doorways. A Panini wide lens and upright-wall lens shift make rooms feel true to size.
+- **3D view** – built from the plan. Each house gets its own roof. Orbit with the roof on or off, click to select, drag furniture across the floor and doors/windows along their wall.
+- **First-person walk** – W A S D, mouse look, Shift to run, wall collision and walkable doorways. Mouse look uses raw input with spike filtering, and a **Mouse look speed** setting in the Walkthrough section tunes it. A Panini wide lens and upright-wall lens shift make rooms feel true to size.
 - **House styles** – eight one-click styles (Modern, Mediterranean, Scandinavian, …) that set walls, roof, windows, doors, paint and floors.
 - **Roofs, floors and paint** – six roof shapes, many roofing materials, 13 floor types and per-room wall paint.
 - **Ask Claude** – describe a house in words, rebuild one from a photo of a floor plan, change a design in plain English, or furnish and landscape it. Every answer arrives as a suggestion to compare and apply or discard.
@@ -73,6 +76,11 @@ The installer is not code-signed, so Windows SmartScreen may warn on first run (
 | V | Select | F | Furniture |
 | W | Walls | A | Ground surfaces |
 | R | Rooms | T | Plants |
+| G | Fences | L | Laser measure |
+| Z | Measure area | J | Gates |
+| Ctrl+A | Select all | Ctrl+G | Group |
+| Shift+Ctrl+G | Ungroup | Drag on empty ground | Box select |
+| P | Backyard (pools, quinchos, courts) | | |
 | D | Doors and openings | M | Measure |
 | N | Windows | ⌘3 / ⌘4 | 3D view / Walk |
 | Alt (hold) | Turn snapping off | Space (hold) | Pan |

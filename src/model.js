@@ -4,12 +4,14 @@
 //   rooms:    { id, name, kind, use, floor, pts: [{x,y}] }               outlines on wall centre lines
 //   areas:    { id, name, material, pts }                                 ground surfaces of the plot
 //   plants:   { id, kind, x, y, r }
+//   gates:    { id, fence, pos, w, h, kind, swing: 1|-1, hinge: 'start'|'end', color? }   sit on a fence run, pos = metres from its start to the centre
+//   fences:   { id, kind: 'large'|'picket', x1, y1, x2, y2, h, color? }   straight runs, h = height in metres
 //   items:    { id, kind, x, y, w, h, rot }                               x, y = centre; rot in degrees
 window.FP = window.FP || {};
 
 (function () {
   const G = FP.geom;
-  const LISTS = { wall: 'walls', opening: 'openings', room: 'rooms', area: 'areas', plant: 'plants', item: 'items' };
+  const LISTS = { wall: 'walls', opening: 'openings', room: 'rooms', area: 'areas', plant: 'plants', fence: 'fences', gate: 'gates', item: 'items' };
 
   const M = FP.model = {
     LISTS,
@@ -38,12 +40,157 @@ window.FP = window.FP || {};
         if (!(o.h > 0)) o.h = d.h;
         if (!(o.sill >= 0)) o.sill = d.sill;
       }
+      for (const fe of p.fences) {
+        const d = FP.catalog.fences[fe.kind] || FP.catalog.fences.large;
+        if (!FP.catalog.fences[fe.kind]) fe.kind = 'large';
+        fe.h = Math.max(0.2, Math.min(4, +fe.h || d.h));
+        if (fe.color && !/^#[0-9a-f]{6}$/i.test(fe.color)) delete fe.color;
+      }
+      for (const g of p.gates) {
+        const d = FP.catalog.gates[g.kind] || FP.catalog.gates.garden;
+        if (!FP.catalog.gates[g.kind]) g.kind = 'garden';
+        g.w = Math.max(0.4, Math.min(8, +g.w || d.w));
+        g.h = Math.max(0.4, Math.min(3.6, +g.h || d.h));
+        g.pos = +g.pos || g.w / 2;
+        g.swing = g.swing === -1 ? -1 : 1;
+        g.hinge = g.hinge === 'end' ? 'end' : 'start';
+        if (g.color && !/^#[0-9a-f]{6}$/i.test(g.color)) delete g.color;
+      }
+      p.gates = p.gates.filter((g) => p.fences.some((fe) => fe.id === g.fence));
+      p.groups = (Array.isArray(p.groups) ? p.groups : []).filter((g) => g && Array.isArray(g.members)).map((g) => ({ id: g.id || M.uid('grp'), name: String(g.name || 'Group'), members: g.members.filter((m) => m && LISTS[m.k] && typeof m.id === 'string').map((m) => ({ k: m.k, id: m.id })) }));
       for (const r of p.rooms) {
         r.use = r.use || 'indoor';
         r.kind = r.kind || 'other';
         r.floor = r.floor || (FP.catalog.roomKinds[r.kind] || FP.catalog.roomKinds.other).floor;
       }
+      M.pruneGroups(p);
       return p;
+    },
+
+    /* ---------- selections & groups ----------
+       A "ref" is { k, id }. A group is { id, name, members: [ref] }; an entity is in at most one group. */
+    MOVABLE: ['wall', 'fence', 'room', 'area', 'item', 'plant'],
+    keyOf(r) { return r.k + ':' + r.id; },
+    liveRefs(p, refs) {
+      const seen = new Set();
+      return (refs || []).filter((r) => {
+        const key = r.k + ':' + r.id;
+        if (seen.has(key) || !M.find(p, r.k, r.id)) return false;
+        seen.add(key);
+        return true;
+      });
+    },
+    sameRefs(a, b) {
+      if (a.length !== b.length) return false;
+      const keys = new Set(a.map(M.keyOf));
+      return b.every((r) => keys.has(M.keyOf(r)));
+    },
+    pruneGroups(p) {
+      const taken = new Set();
+      p.groups = (p.groups || []).map((g) => {
+        const m = M.liveRefs(p, g.members).filter((r) => !taken.has(M.keyOf(r)));
+        m.forEach((r) => taken.add(M.keyOf(r)));
+        g.members = m.map((r) => ({ k: r.k, id: r.id }));
+        return g;
+      }).filter((g) => g.members.length > 1);
+    },
+    groupOf(p, ref) { return (p.groups || []).find((g) => g.members.some((m) => m.k === ref.k && m.id === ref.id)) || null; },
+
+    // Bounding box of one thing in metres: { x0, y0, x1, y1 }
+    refBox(p, r, thin) {
+      const e = M.find(p, r.k, r.id);
+      if (!e) return null;
+      let xs, ys;
+      if (e.pts) { xs = e.pts.map((q) => q.x); ys = e.pts.map((q) => q.y); }
+      else if (r.k === 'wall') { const h = thin ? 0 : Math.max(e.t || 0.1, 0.05) / 2; xs = [e.x1 - h, e.x1 + h, e.x2 - h, e.x2 + h]; ys = [e.y1 - h, e.y1 + h, e.y2 - h, e.y2 + h]; }
+      else if (r.k === 'fence') { const h = thin ? 0 : 0.1; xs = [e.x1 - h, e.x1 + h, e.x2 - h, e.x2 + h]; ys = [e.y1 - h, e.y1 + h, e.y2 - h, e.y2 + h]; }
+      else if (r.k === 'plant') { xs = [e.x - e.r, e.x + e.r]; ys = [e.y - e.r, e.y + e.r]; }
+      else if (r.k === 'item') {
+        const a = ((e.rot || 0) * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a), hw = e.w / 2, hh = e.h / 2;
+        const cs = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]];
+        xs = cs.map(([x, y]) => e.x + x * c - y * s); ys = cs.map(([x, y]) => e.y + x * s + y * c);
+      } else if (r.k === 'opening' || r.k === 'gate') {
+        const g = r.k === 'opening' ? M.openingGeo(p, e) : M.gateGeo(p, e);
+        if (!g) return null;
+        xs = [g.c.x - e.w / 2, g.c.x + e.w / 2]; ys = [g.c.y - e.w / 2, g.c.y + e.w / 2];
+      } else return null;
+      return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+    },
+    selBox(p, refs, thin) {
+      let b = null;
+      for (const r of refs) {
+        const q = M.refBox(p, r, thin);
+        if (!q) continue;
+        b = b ? { x0: Math.min(b.x0, q.x0), y0: Math.min(b.y0, q.y0), x1: Math.max(b.x1, q.x1), y1: Math.max(b.y1, q.y1) } : q;
+      }
+      return b;
+    },
+
+    // Move one entity by (dx, dy). Doors, windows and gates ride on their wall or fence, so they are not moved on their own.
+    moveEnt(k, e, dx, dy) {
+      const r = G.round;
+      if (e.pts) e.pts = e.pts.map((q) => ({ x: r(q.x + dx), y: r(q.y + dy) }));
+      else if (k === 'wall' || k === 'fence') { e.x1 = r(e.x1 + dx); e.y1 = r(e.y1 + dy); e.x2 = r(e.x2 + dx); e.y2 = r(e.y2 + dy); }
+      else if (k === 'item' || k === 'plant') { e.x = r(e.x + dx); e.y = r(e.y + dy); }
+    },
+    translateRefs(p, refs, dx, dy) {
+      for (const r of refs) {
+        if (!M.MOVABLE.includes(r.k)) continue;
+        const e = M.find(p, r.k, r.id);
+        if (e) M.moveEnt(r.k, e, dx, dy);
+      }
+      M.clampGates(p);
+    },
+    // Turn the things by a quarter turn about c: dir 1 = clockwise on the plan, -1 = anticlockwise.
+    rotateRefs(p, refs, c, dir) {
+      const r = G.round;
+      const pt = (x, y) => (dir > 0 ? { x: r(c.x - (y - c.y)), y: r(c.y + (x - c.x)) } : { x: r(c.x + (y - c.y)), y: r(c.y - (x - c.x)) });
+      for (const ref of refs) {
+        const e = M.find(p, ref.k, ref.id);
+        if (!e) continue;
+        if (e.pts) e.pts = e.pts.map((q) => pt(q.x, q.y));
+        else if (ref.k === 'wall' || ref.k === 'fence') { const a = pt(e.x1, e.y1), b = pt(e.x2, e.y2); e.x1 = a.x; e.y1 = a.y; e.x2 = b.x; e.y2 = b.y; }
+        else if (ref.k === 'plant') { const a = pt(e.x, e.y); e.x = a.x; e.y = a.y; }
+        else if (ref.k === 'item') { const a = pt(e.x, e.y); e.x = a.x; e.y = a.y; e.rot = ((((e.rot || 0) + 90 * dir) % 360) + 360) % 360; }
+      }
+      M.clampGates(p);
+    },
+    // Copy the things (and the doors, windows and gates on copied walls and fences), shifted by d. Returns the new refs.
+    cloneRefs(p, refs, d) {
+      const map = new Map(), out = [];
+      refs = M.liveRefs(p, refs);
+      for (const k of ['wall', 'fence', 'room', 'area', 'item', 'plant', 'opening', 'gate']) {
+        for (const r of refs) {
+          if (r.k !== k) continue;
+          const c = JSON.parse(JSON.stringify(M.find(p, k, r.id)));
+          c.id = M.uid(k[0]);
+          if (k === 'opening' || k === 'gate') {
+            const host = map.get(k === 'opening' ? c.wall : c.fence);
+            if (!host) continue;
+            if (k === 'opening') c.wall = host; else c.fence = host;
+          } else M.moveEnt(k, c, d, d);
+          if (k === 'room') c.name = c.name + ' copy';
+          map.set(r.id, c.id);
+          M.list(p, k).push(c);
+          out.push({ k, id: c.id });
+        }
+      }
+      return out;
+    },
+    // Everything that belongs to the building a room is part of: its rooms, walls, doors, windows, furniture and plants.
+    houseRefs(p, roomId) {
+      const grp = M.roofGroups(p).find((g) => g.rooms.some((r) => r.id === roomId));
+      if (!grp) return null;
+      const b = grp.bounds, m = 0.45;
+      const inside = (x, y) => x >= b.x - m && x <= b.x + b.w + m && y >= b.y - m && y <= b.y + b.h + m;
+      const out = grp.rooms.map((r) => ({ k: 'room', id: r.id }));
+      const walls = p.walls.filter((w) => inside(w.x1, w.y1) && inside(w.x2, w.y2));
+      for (const w of walls) out.push({ k: 'wall', id: w.id });
+      const ids = new Set(walls.map((w) => w.id));
+      for (const o of p.openings) if (ids.has(o.wall)) out.push({ k: 'opening', id: o.id });
+      for (const it of p.items) if (inside(it.x, it.y)) out.push({ k: 'item', id: it.id });
+      for (const pl of p.plants) if (inside(pl.x, pl.y)) out.push({ k: 'plant', id: pl.id });
+      return out;
     },
 
     list(p, k) { return p[LISTS[k]]; },
@@ -53,6 +200,33 @@ window.FP = window.FP || {};
       const key = LISTS[k];
       p[key] = p[key].filter((e) => e.id !== id);
       if (k === 'wall') p.openings = p.openings.filter((o) => o.wall !== id);
+      if (k === 'fence') p.gates = (p.gates || []).filter((g) => g.fence !== id);
+      M.pruneGroups(p);
+    },
+
+    // Gates ride on a fence run: pos is metres from its start to the gate's centre.
+    clampGate(p, g) {
+      const fe = M.find(p, 'fence', g.fence);
+      if (!fe) return;
+      const L = Math.hypot(fe.x2 - fe.x1, fe.y2 - fe.y1);
+      g.w = Math.max(0.4, Math.min(g.w, Math.max(0.4, L - 0.2)));
+      g.pos = Math.max(g.w / 2, Math.min(L - g.w / 2, g.pos));
+    },
+    clampGates(p) { for (const g of p.gates || []) M.clampGate(p, g); },
+    // Geometry of a gate on its fence, shaped like openingGeo: jamb points s and e, centre c, unit vectors in v.
+    gateGeo(p, g) {
+      const fe = M.find(p, 'fence', g.fence);
+      if (!fe) return null;
+      const v = M.wallVec(fe);
+      const w = Math.min(g.w, Math.max(0.4, v.L - 0.2));
+      const pos = Math.max(w / 2, Math.min(v.L - w / 2, g.pos));
+      const c = { x: v.a.x + v.ux * pos, y: v.a.y + v.uy * pos };
+      return {
+        fence: fe, v, t: 0.12, c, w,
+        s: { x: c.x - (v.ux * w) / 2, y: c.y - (v.uy * w) / 2 },
+        e: { x: c.x + (v.ux * w) / 2, y: c.y + (v.uy * w) / 2 },
+        from: pos - w / 2, to: pos + w / 2
+      };
     },
 
     /* ---------- walls & openings ---------- */
@@ -308,10 +482,19 @@ window.FP = window.FP || {};
       const mx = axisMap(true), my = axisMap(false);
       const P = (q) => ({ x: G.round(mx.f(q.x)), y: G.round(my.f(q.y)) });
       const centres = new Map(p.openings.map((o) => { const g = M.openingGeo(p, o); return [o.id, g ? g.c : null]; }));
+      const gcentres = new Map(p.gates.map((g) => { const q = M.gateGeo(p, g); return [g.id, q ? q.c : null]; }));
       for (const w of p.walls) { const a = P({ x: w.x1, y: w.y1 }), b = P({ x: w.x2, y: w.y2 }); w.x1 = a.x; w.y1 = a.y; w.x2 = b.x; w.y2 = b.y; }
       for (const r of p.rooms) r.pts = r.pts.map(P);
       for (const a of p.areas) a.pts = a.pts.map(P);
       for (const e of p.items.concat(p.plants)) { const q = P(e); e.x = q.x; e.y = q.y; }
+      for (const fe of p.fences) { const a = P({ x: fe.x1, y: fe.y1 }), b = P({ x: fe.x2, y: fe.y2 }); fe.x1 = a.x; fe.y1 = a.y; fe.x2 = b.x; fe.y2 = b.y; }
+      for (const g of p.gates) {
+        const c = gcentres.get(g.id), fe = M.find(p, 'fence', g.fence);
+        if (!c || !fe) continue;
+        const v = M.wallVec(fe);
+        g.pos = G.round(G.project(P(c), v.a, v.b).t * v.L);
+        M.clampGate(p, g);
+      }
       for (const o of p.openings) {
         const c = centres.get(o.id), w = M.find(p, 'wall', o.wall);
         if (!c || !w) continue;
@@ -332,6 +515,78 @@ window.FP = window.FP || {};
     },
 
     // Bounding box of everything built: walls plus indoor and covered rooms.
+    /* ---------- importing a house from another design ---------- */
+    // Footprint of a whole house, outer wall face to outer wall face: every wall and every room outline.
+    houseFootprint(p) {
+      const pts = [];
+      for (const w of p.walls) pts.push({ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
+      for (const r of p.rooms) pts.push(...r.pts);
+      if (!pts.length) return null;
+      const b = G.bbox(pts), pad = p.walls.reduce((m, w) => Math.max(m, w.t / 2), 0);
+      return { x: G.round(b.x - pad), y: G.round(b.y - pad), w: G.round(b.w + pad * 2), h: G.round(b.h + pad * 2) };
+    },
+    // Size of a footprint after turning the house clockwise by rot (0, 90, 180, 270).
+    turnedSize(fp, rot) { return rot % 180 ? { w: fp.h, h: fp.w } : { w: fp.w, h: fp.h }; },
+    SIDES: ['north', 'east', 'south', 'west'],
+    turnSide(side, rot) { return M.SIDES[(M.SIDES.indexOf(side) + (((rot / 90) % 4) + 4) % 4) % 4]; },
+    // Which side of its footprint a point lies on.
+    sideOf(fp, q) {
+      const dx = (q.x - (fp.x + fp.w / 2)) / fp.w, dy = (q.y - (fp.y + fp.h / 2)) / fp.h;
+      return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'east' : 'west') : (dy > 0 ? 'south' : 'north');
+    },
+    // Sides of the house that its exterior doors (not windows) open on, most doors first.
+    doorSides(p, fp) {
+      const n = {};
+      for (const o of p.openings) {
+        if (o.type === 'window') continue;
+        const g = M.openingGeo(p, o);
+        if (!g || g.wall.kind !== 'exterior') continue;
+        const s = M.sideOf(fp, g.c);
+        n[s] = (n[s] || 0) + 1;
+      }
+      return Object.entries(n).sort((a, b) => b[1] - a[1]).map(([s]) => s);
+    },
+    // Copy the house of src into target: turned clockwise by rot, with its outer top-left corner at (x, y).
+    // Plants standing where the house lands are removed. Returns counts and the rectangle it covers.
+    importHouse(target, src, o) {
+      const fp = M.houseFootprint(src);
+      if (!fp) return null;
+      const rot = (((Math.round((o.rot || 0) / 90) * 90) % 360) + 360) % 360, a = (rot * Math.PI) / 180, c = Math.round(Math.cos(a)), s = Math.round(Math.sin(a));
+      const size = M.turnedSize(fp, rot);
+      const turn = (q) => { const dx = q.x - fp.x, dy = q.y - fp.y; return { x: dx * c - dy * s, y: dx * s + dy * c }; };
+      const k = [turn({ x: fp.x, y: fp.y }), turn({ x: fp.x + fp.w, y: fp.y + fp.h })];
+      const ox = Math.min(k[0].x, k[1].x), oy = Math.min(k[0].y, k[1].y);
+      const T = (q) => { const r = turn(q); return { x: G.round(o.x + r.x - ox, 2), y: G.round(o.y + r.y - oy, 2) }; };
+      const copy = (v) => JSON.parse(JSON.stringify(v));
+      const out = { walls: 0, openings: 0, rooms: 0, items: 0, plantsRemoved: 0, rect: { x: o.x, y: o.y, w: size.w, h: size.h } };
+      const ids = new Map();
+      for (const w of src.walls) {
+        const p1 = T({ x: w.x1, y: w.y1 }), p2 = T({ x: w.x2, y: w.y2 }), n = Object.assign(copy(w), { id: M.uid('w'), x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y });
+        ids.set(w.id, n.id); target.walls.push(n); out.walls++;
+      }
+      for (const op of src.openings) {
+        if (!ids.has(op.wall)) continue;
+        target.openings.push(Object.assign(copy(op), { id: M.uid('o'), wall: ids.get(op.wall) })); out.openings++;
+      }
+      for (const r of src.rooms) { target.rooms.push(Object.assign(copy(r), { id: M.uid('r'), pts: r.pts.map(T) })); out.rooms++; }
+      if (o.furniture) {
+        for (const it of src.items) {
+          if (it.x < fp.x - 0.5 || it.x > fp.x + fp.w + 0.5 || it.y < fp.y - 0.5 || it.y > fp.y + fp.h + 0.5) continue;
+          const q = T(it);
+          target.items.push(Object.assign(copy(it), { id: M.uid('i'), x: q.x, y: q.y, rot: (((it.rot || 0) + rot) % 360 + 360) % 360 })); out.items++;
+        }
+      }
+      if (o.look) {
+        target.settings.style = copy(src.settings.style);
+        target.settings.roof = copy(src.settings.roof);
+        target.settings.wallH = src.settings.wallH;
+      }
+      const R = out.rect, before = target.plants.length;
+      target.plants = target.plants.filter((pl) => !(pl.x > R.x - 0.3 && pl.x < R.x + R.w + 0.3 && pl.y > R.y - 0.3 && pl.y < R.y + R.h + 0.3));
+      out.plantsRemoved = before - target.plants.length;
+      return out;
+    },
+
     houseBounds(p) {
       const pts = [];
       for (const w of p.walls) pts.push({ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
@@ -340,11 +595,38 @@ window.FP = window.FP || {};
     },
 
     /* ---------- heights & roof ---------- */
-    // Footprint the main roof covers: indoor rooms only.
+    // The separate buildings of a plot: indoor rooms that touch or sit within wall thickness of each other
+    // share one roof, rooms further apart (a second house, stables, a guest cottage) get their own.
+    // Returns [{ rooms, bounds }] largest first.
+    roofGroups(p, gap = 0.5) {
+      const rooms = p.rooms.filter((r) => r.use === 'indoor' && r.pts.length > 2);
+      const near = (a, b) => {
+        const edges = (r) => r.pts.map((q, i) => [q, r.pts[(i + 1) % r.pts.length]]);
+        for (const [A, B] of [[a, b], [b, a]]) {
+          for (const q of A.pts) {
+            if (G.pointInPoly(q, B.pts)) return true;
+            for (const [s, t] of edges(B)) if (G.project(q, s, t).d <= gap) return true;
+          }
+        }
+        return false;
+      };
+      const parent = rooms.map((_, i) => i), find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+      for (let i = 0; i < rooms.length; i++) for (let j = i + 1; j < rooms.length; j++) {
+        const bi = G.bbox(rooms[i].pts), bj = G.bbox(rooms[j].pts);
+        if (bi.x > bj.x + bj.w + gap || bj.x > bi.x + bi.w + gap || bi.y > bj.y + bj.h + gap || bj.y > bi.y + bi.h + gap) continue;
+        if (near(rooms[i], rooms[j])) parent[find(i)] = find(j);
+      }
+      const map = new Map();
+      rooms.forEach((r, i) => { const k = find(i); if (!map.has(k)) map.set(k, []); map.get(k).push(r); });
+      return [...map.values()].map((rs) => {
+        const b = G.bbox(rs.flatMap((r) => r.pts));
+        return { rooms: rs, bounds: b };
+      }).sort((x, y) => y.bounds.w * y.bounds.h - x.bounds.w * x.bounds.h);
+    },
+    // Footprint of the main (largest) building. Its width sets the roof height shown in the inspector.
     roofBounds(p) {
-      const pts = [];
-      for (const r of p.rooms) if (r.use === 'indoor') pts.push(...r.pts);
-      return pts.length ? G.bbox(pts) : null;
+      const g = M.roofGroups(p);
+      return g.length ? g[0].bounds : null;
     },
 
     // How far the roof rises above the top of the walls.
@@ -395,7 +677,7 @@ window.FP = window.FP || {};
       const s = {
         rooms: [], indoor: 0, covered: 0, outdoor: 0,
         lot: p.lot.w * p.lot.h, ground: {}, groundTotal: 0,
-        plants: {}, plantCount: 0, openings: {}, wallLen: { exterior: 0, interior: 0 }
+        plants: {}, plantCount: 0, fences: {}, gates: {}, openings: {}, wallLen: { exterior: 0, interior: 0 }
       };
       // Room areas are usable floor inside the walls. "Built" adds the walls: centre-line area of
       // the indoor rooms plus the outer half of the exterior walls.
@@ -420,6 +702,8 @@ window.FP = window.FP || {};
       s.openGround = Math.max(0, s.lot - s.roofed - s.outdoor - s.groundTotal);
       s.coverage = s.lot > 0 ? s.roofed / s.lot : 0;
       for (const pl of p.plants) { s.plants[pl.kind] = (s.plants[pl.kind] || 0) + 1; s.plantCount++; }
+      for (const fe of p.fences) s.fences[fe.kind] = (s.fences[fe.kind] || 0) + Math.hypot(fe.x2 - fe.x1, fe.y2 - fe.y1);
+      for (const g of p.gates) s.gates[g.kind] = (s.gates[g.kind] || 0) + 1;
       for (const o of p.openings) s.openings[o.type] = (s.openings[o.type] || 0) + 1;
       for (const w of p.walls) s.wallLen[w.kind === 'exterior' ? 'exterior' : 'interior'] += Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
       const hb = M.houseBounds(p);

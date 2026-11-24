@@ -1003,6 +1003,154 @@ window.FP = window.FP || {};
     }
   };
 
+  /* ---------- pools, quinchos and sports fields: the model stretches to the item's width and depth ---------- */
+  const flatShape = (pts) => new T.Shape(pts.map((q) => new T.Vector2(q[0], -q[1])));
+  // A flat plate between y0 and y1 following an outline, optionally with a hole (a band).
+  function plate(outer, inner, y0, y1, mat) {
+    const s = flatShape(outer);
+    if (inner) s.holes.push(new T.Path(inner.map((q) => new T.Vector2(q[0], -q[1]))));
+    const geo = new T.ExtrudeGeometry(s, { depth: y1 - y0, bevelEnabled: false });
+    geo.rotateX(-PI / 2);
+    geo.translate(0, y0, 0);
+    return mesh(geo, mat);
+  }
+  const ellipsePts = (rx, rz, n) => { const o = []; for (let i = 0; i < (n || 56); i++) { const t = (i / (n || 56)) * PI * 2; o.push([Math.cos(t) * rx, Math.sin(t) * rz]); } return o; };
+  function kidneyPts(w, h, d) {
+    const a = Math.max(0.2, w / 2 - d), b = Math.max(0.2, h / 2 - d), k = -0.42 * b, out = [];
+    for (let i = 0; i < 56; i++) { const t = (i / 56) * PI * 2, c = Math.cos(t); out.push([a * c, b * Math.sin(t) * 0.78 + k * c * c + 0.2 * b]); }
+    return out;
+  }
+  function flatRing(cx, cz, r, lw, y, a0, a1, mat) {
+    const geo = new T.RingGeometry(Math.max(0.01, r - lw / 2), r + lw / 2, 64, 1, a0, a1 - a0);
+    geo.rotateX(-PI / 2);
+    return mesh(geo, mat, cx, y, cz);
+  }
+  function poolMats() { return { cope: M.matte('#ece7dc'), tile: M.matte('#2f86ad'), water: M.gloss('#47b6dc'), step: M.matte('#a6dcec') }; }
+  function basin(g, outer, inner, m) {
+    g.add(plate(outer, inner, 0, 0.2, m.cope), plate(inner, null, 0, 0.14, m.tile), plate(inner, null, 0.14, 0.17, m.water));
+  }
+  ITEMS['pool'] = (g, w, h) => {
+    const m = poolMats(), c = Math.min(0.4, w / 3, h / 3), x0 = -w / 2 + c, x1 = w / 2 - c, z0 = -h / 2 + c, z1 = h / 2 - c;
+    g.add(box(-w / 2, w / 2, 0, 0.2, -h / 2, z0, m.cope), box(-w / 2, w / 2, 0, 0.2, z1, h / 2, m.cope), box(-w / 2, x0, 0, 0.2, z0, z1, m.cope), box(x1, w / 2, 0, 0.2, z0, z1, m.cope));
+    g.add(box(x0, x1, 0, 0.14, z0, z1, m.tile), box(x0, x1, 0.14, 0.17, z0, z1, m.water));
+    const sw = Math.min(x1 - x0 - 0.2, Math.max(1.2, w * 0.45)), sd = Math.min(h * 0.22, 1.1);
+    for (let i = 0; i < 3; i++) g.add(box(-sw / 2, sw / 2, 0.14, 0.16 + 0.0 * i, z0 + (sd * i) / 3, z0 + (sd * (i + 1)) / 3, m.step));
+  };
+  ITEMS['plunge'] = (g, w, h) => {
+    const m = poolMats(), c = Math.min(0.3, w / 3, h / 3);
+    g.add(box(-w / 2, w / 2, 0, 0.22, -h / 2, -h / 2 + c, m.cope), box(-w / 2, w / 2, 0, 0.22, h / 2 - c, h / 2, m.cope), box(-w / 2, -w / 2 + c, 0, 0.22, -h / 2 + c, h / 2 - c, m.cope), box(w / 2 - c, w / 2, 0, 0.22, -h / 2 + c, h / 2 - c, m.cope));
+    g.add(box(-w / 2 + c, w / 2 - c, 0, 0.14, -h / 2 + c, h / 2 - c, m.tile), box(-w / 2 + c, w / 2 - c, 0.14, 0.18, -h / 2 + c, h / 2 - c, m.water));
+    g.add(box(-w / 2 + c, -w / 2 + c + 0.45, 0.14, 0.19, -h / 2 + c, h / 2 - c, m.step));
+  };
+  ITEMS['pool-oval'] = (g, w, h) => { const c = Math.min(0.4, w / 3, h / 3); basin(g, ellipsePts(w / 2, h / 2), ellipsePts(w / 2 - c, h / 2 - c), poolMats()); };
+  ITEMS['pool-kidney'] = (g, w, h) => { const c = Math.min(0.4, w / 3, h / 3); basin(g, kidneyPts(w, h, 0), kidneyPts(w, h, c), poolMats()); };
+  ITEMS['spa'] = (g, w, h) => {
+    const m = poolMats();
+    g.add(plate(ellipsePts(w / 2, h / 2, 40), ellipsePts(w / 2 - 0.2, h / 2 - 0.2, 40), 0, 0.5, M.wood('#7a5a3c')), plate(ellipsePts(w / 2 - 0.2, h / 2 - 0.2, 40), null, 0, 0.4, m.tile), plate(ellipsePts(w / 2 - 0.2, h / 2 - 0.2, 40), null, 0.4, 0.44, m.water));
+  };
+
+  ITEMS['quincho'] = (g, w, h) => {
+    const brick = M.matte('#a65a43'), floor = M.matte('#d3c9b9'), wood = M.wood(TEAK), post = M.wood('#5e4636'), tile = M.matte('#b5633f'), dark = M.matte('#2f2e2d'), stone = M.matte('#8c8579');
+    const wall = 2.5, over = 0.45, ridge = wall + Math.min(1.5, (h / 2) * 0.5), wt = 0.3;
+    g.add(box(-w / 2, w / 2, 0, 0.08, -h / 2, h / 2, floor));
+    // back wall, half-height side walls
+    g.add(box(-w / 2, w / 2, 0.08, wall, -h / 2, -h / 2 + wt, brick));
+    for (const sx of [-1, 1]) g.add(box(sx < 0 ? -w / 2 : w / 2 - wt, sx < 0 ? -w / 2 + wt : w / 2, 0.08, 1.0, -h / 2 + wt, h / 2, brick));
+    // parrilla: brick base with an iron grate, hood and chimney
+    const gw = Math.min(1.8, w * 0.4), gd = Math.min(0.75, h * 0.2), gz = -h / 2 + wt;
+    g.add(box(-gw / 2, gw / 2, 0.08, 0.8, gz, gz + gd, brick), box(-gw / 2 + 0.05, gw / 2 - 0.05, 0.8, 0.86, gz + 0.05, gz + gd - 0.03, dark), box(-gw / 2 - 0.08, gw / 2 + 0.08, 1.45, wall, gz, gz + gd * 0.7, brick));
+    g.add(box(-0.28, 0.28, wall, wall + 1.5, -h / 2, -h / 2 + 0.6, brick), box(-0.34, 0.34, wall + 1.5, wall + 1.6, -h / 2 - 0.03, -h / 2 + 0.63, stone));
+    // long table with benches
+    const tw = Math.min(w * 0.6, 3.4), td = Math.min(h * 0.22, 0.9), ty = h * 0.12;
+    g.add(box(-tw / 2, tw / 2, 0.72, 0.77, ty - td / 2, ty + td / 2, wood));
+    for (const lx of [-1, 1]) for (const lz of [-1, 1]) g.add(box(lx * (tw / 2 - 0.12) - 0.04, lx * (tw / 2 - 0.12) + 0.04, 0.08, 0.72, ty + lz * (td / 2 - 0.08) - 0.04, ty + lz * (td / 2 - 0.08) + 0.04, post));
+    for (const k of [-1, 1]) g.add(box(-tw / 2, tw / 2, 0.43, 0.47, ty + k * (td / 2 + 0.25) - 0.17, ty + k * (td / 2 + 0.25) + 0.17, wood));
+    // corner posts, roof of two sloped sheets and the gable ends
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(box(sx * (w / 2 - 0.17) - 0.1, sx * (w / 2 - 0.17) + 0.1, 0.08, wall, sz * (h / 2 - 0.17) - 0.1, sz * (h / 2 - 0.17) + 0.1, post));
+    const run = h / 2 + over, alpha = Math.atan((ridge - wall) / run), len = run / Math.cos(alpha);
+    for (const s of [-1, 1]) {
+      const sl = mesh(new T.BoxGeometry(w + over * 2, 0.1, len), tile, 0, (wall + ridge) / 2 + 0.03, (s * run) / 2);
+      sl.rotation.x = s * alpha;
+      g.add(sl);
+    }
+    for (const sx of [-1, 1]) {
+      const tri = new T.Shape([new T.Vector2(-h / 2, wall), new T.Vector2(h / 2, wall), new T.Vector2(0, ridge)]);
+      const geo = new T.ExtrudeGeometry(tri, { depth: 0.08, bevelEnabled: false });
+      geo.rotateY(PI / 2);
+      geo.translate(sx * (w / 2) - 0.04, 0, 0);
+      g.add(mesh(geo, wood));
+    }
+    g.add(box(-w / 2 - over, w / 2 + over, ridge + 0.02, ridge + 0.09, -0.08, 0.08, tile));
+  };
+  ITEMS['parrilla'] = (g, w, h) => {
+    const brick = M.matte('#a65a43'), dark = M.matte('#2f2e2d'), stone = M.matte('#8c8579');
+    g.add(box(-w / 2, w / 2, 0, 0.8, -h / 2, h / 2, brick), box(-w / 2 + 0.06, w / 2 - 0.06, 0.8, 0.86, -h / 2 + 0.16, h / 2 - 0.06, dark));
+    g.add(box(w / 2 - 0.4, w / 2 - 0.08, 0.8, 1.9, -h / 2, -h / 2 + 0.3, brick), box(w / 2 - 0.44, w / 2 - 0.04, 1.9, 1.96, -h / 2 - 0.03, -h / 2 + 0.33, stone));
+  };
+
+  function pitch(g, a, b) {
+    const ins = Math.max(0.2, Math.min(0.8, b * 0.04)), lw = Math.max(0.08, Math.min(0.14, b * 0.007));
+    const light = M.matte('#5e9d49'), dark = M.matte('#559340'), white = M.matte('#f4f4f1'), frame = M.metal('#f2f2f2');
+    g.add(box(-a / 2, a / 2, 0, 0.03, -b / 2, b / 2, dark));
+    const n = Math.max(4, 2 * Math.round(a / 8));
+    for (let i = 1; i < n; i += 2) g.add(box(-a / 2 + (i * a) / n, -a / 2 + ((i + 1) * a) / n, 0.03, 0.035, -b / 2, b / 2, light));
+    const y0 = 0.035, y1 = 0.042, hl = lw / 2;
+    const rect = (x0, z0, x1, z1) => g.add(box(x0, x1, y0, y1, z0 - hl, z0 + hl, white), box(x0, x1, y0, y1, z1 - hl, z1 + hl, white), box(x0 - hl, x0 + hl, y0, y1, z0, z1, white), box(x1 - hl, x1 + hl, y0, y1, z0, z1, white));
+    rect(-a / 2 + ins, -b / 2 + ins, a / 2 - ins, b / 2 - ins);
+    g.add(box(-hl, hl, y0, y1, -b / 2 + ins, b / 2 - ins, white), flatRing(0, 0, Math.min(b * 0.135, a * 0.09), lw, y1 + 0.001, 0, PI * 2, white));
+    const pd = a * 0.157, pw = b * 0.593, sd = a * 0.052, sw = b * 0.27, sp = a * 0.105, gw = Math.max(1.2, b * 0.108), gh = Math.max(1.1, Math.min(2.44, gw * 0.34));
+    for (const e of [-1, 1]) {
+      const x = e * (a / 2 - ins);
+      rect(Math.min(x, x - e * pd), -pw / 2, Math.max(x, x - e * pd), pw / 2);
+      rect(Math.min(x, x - e * sd), -sw / 2, Math.max(x, x - e * sd), sw / 2);
+      g.add(cyl(x - e * sp, 0, 0.1, 0.1, y0, y1 + 0.001, white, 12));
+      // goal: two posts and a crossbar on the goal line
+      for (const sz of [-1, 1]) g.add(cyl(x, sz * gw / 2, 0.06, 0.06, 0, gh, frame, 8));
+      g.add(box(x - 0.05, x + 0.05, gh - 0.05, gh + 0.05, -gw / 2, gw / 2, frame));
+    }
+  }
+  ITEMS['soccer'] = (g, w, h) => {
+    const sub = new T.Group();
+    pitch(sub, Math.max(w, h), Math.min(w, h));
+    if (h > w) sub.rotation.y = PI / 2;
+    g.add(sub);
+  };
+
+  function court(g, a, b, half) {
+    const sc = b / 15, ins = Math.min(1.2, b * 0.08), lw = Math.max(0.07, 0.05 * sc + 0.03);
+    const border = M.matte('#3f7a63'), wood = M.matte('#d9a66b'), paint = M.matte('#b5473a'), white = M.matte('#f6f6f3'), steel = M.metal('#cfd3d6'), board = M.gloss('#f2f4f5'), rimM = M.matte('#e0602a');
+    g.add(box(-a / 2, a / 2, 0, 0.03, -b / 2, b / 2, border), box(-a / 2 + ins, a / 2 - ins, 0.03, 0.036, -b / 2 + ins, b / 2 - ins, wood));
+    const y0 = 0.036, y1 = 0.043, hl = lw / 2, x0 = -a / 2 + ins, x1 = a / 2 - ins, z0 = -b / 2 + ins, z1 = b / 2 - ins;
+    const rect = (ax, az, bx, bz) => g.add(box(ax, bx, y0, y1, az - hl, az + hl, white), box(ax, bx, y0, y1, bz - hl, bz + hl, white), box(ax - hl, ax + hl, y0, y1, az, bz, white), box(bx - hl, bx + hl, y0, y1, az, bz, white));
+    rect(x0, z0, x1, z1);
+    if (!half) g.add(box(-hl, hl, y0, y1, z0, z1, white), flatRing(0, 0, 1.8 * sc, lw, y1 + 0.001, 0, PI * 2, white));
+    const end = (e) => {
+      const base = e * (a / 2 - ins), dir = -e, hoop = base + dir * 1.575 * sc, key = 5.8 * sc, kw = 4.9 * sc, r3 = 6.75 * sc, dy = b / 2 - ins - 0.9 * sc;
+      const kx = [base, base + dir * key].sort((p, q) => p - q);
+      g.add(box(kx[0], kx[1], y0, y0 + 0.004, -kw / 2, kw / 2, paint));
+      rect(kx[0], -kw / 2, kx[1], kw / 2);
+      const ang = e < 0 ? [0, 0] : [PI, PI];
+      g.add(flatRing(base + dir * key, 0, 1.8 * sc, lw, y1 + 0.001, 0, PI * 2, white));
+      if (dy < r3) {
+        const phi = Math.asin(dy / r3), dx = Math.sqrt(r3 * r3 - dy * dy);
+        g.add(flatRing(hoop, 0, r3, lw, y1 + 0.001, ang[0] - phi, ang[0] + phi, white));
+        for (const sz of [-1, 1]) { const xa = Math.min(base, hoop + dir * dx), xb = Math.max(base, hoop + dir * dx); g.add(box(xa, xb, y0, y1, sz * dy - hl, sz * dy + hl, white)); }
+      }
+      // hoop: pole behind the baseline, arm, backboard and rim
+      const px = base - dir * 0.5, bx = base + dir * 1.2 * sc;
+      g.add(cyl(px, 0, 0.08, 0.1, 0, 3.4, steel, 10), box(Math.min(px, bx) - 0.04, Math.max(px, bx) + 0.04, 3.2, 3.3, -0.05, 0.05, steel));
+      g.add(box(bx - 0.03, bx + 0.03, 2.9, 3.95, -0.9, 0.9, board));
+      const rim = new T.Mesh(new T.TorusGeometry(0.23, 0.014, 6, 20), rimM);
+      rim.rotation.x = PI / 2;
+      rim.position.set(hoop, 3.05, 0);
+      g.add(rim);
+    };
+    end(-1);
+    if (!half) end(1);
+  }
+  ITEMS['basketball'] = (g, w, h) => { const sub = new T.Group(); court(sub, Math.max(w, h), Math.min(w, h), false); if (h > w) sub.rotation.y = PI / 2; g.add(sub); };
+  ITEMS['basketball-half'] = (g, w, h) => { const sub = new T.Group(); court(sub, w, h, true); g.add(sub); };
+
   ITEMS['bbq'] = (g, w, h) => {
     const x0 = -w / 2, x1 = w / 2, z0 = -h / 2, z1 = h / 2, en = M.gloss('#2a2b2d'), st = M.metal(STEEL), chr = M.metal(CHROME), blk = M.matte('#1f2022');
     const bw = Math.min(0.7, w * 0.58), legH = Q ? 0.1 : 0, cz0 = z0 + 0.04, cz1 = z1 - 0.05, top = 0.86;

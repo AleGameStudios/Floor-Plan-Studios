@@ -50,7 +50,7 @@ window.FP = window.FP || {};
     const keptPlants = o.landscape && o.replaceLandscape ? [] : p.plants;
     const keptAreas = o.landscape && o.replaceLandscape ? [] : p.areas;
 
-    const catalog = Object.entries(C.items).map(([k, d]) => k + ' — ' + d.label + ', ' + d.w + ' × ' + d.h + ' m');
+    const catalog = Object.entries(C.items).filter(([, d]) => d.layer !== 'landscape').map(([k, d]) => k + ' — ' + d.label + ', ' + d.w + ' × ' + d.h + ' m');
     const plantKinds = Object.entries(C.plants).map(([k, d]) => k + ' — ' + d.label + ', typical canopy radius ' + d.r + ' m');
 
     const plan = {
@@ -173,7 +173,7 @@ window.FP = window.FP || {};
   }
 
   /* ---------- whole-design requests: "Describe it" and "Ask Claude to change…" ---------- */
-  const LISTS = ['lot', 'walls', 'openings', 'rooms', 'areas', 'plants', 'items'];
+  const LISTS = ['lot', 'walls', 'openings', 'rooms', 'areas', 'plants', 'fences', 'gates', 'items'];
   const HEX = /^#[0-9a-f]{6}$/i;
 
   const DESIGN_SYSTEM = 'You are an experienced residential architect, interior designer and landscape architect. ' +
@@ -194,13 +194,16 @@ window.FP = window.FP || {};
     '  Room sizes the owner gives, and sizes written on drawings, are CLEAR sizes between wall faces. A room\'s centre-line outline is its clear size plus half the thickness of each wall around it: a 3 × 3 m room inside 0.12 m walls is 3.12 × 3.12 m on centre lines; with one 0.2 m exterior wall on a side it is 3.16 m that way.',
     '  kind: ' + Object.keys(C.roomKinds).join(', ') + '. use: indoor (enclosed, counts as house area), covered (roof only: gallery, porch, carport), outdoor.',
     '  floor: ' + Object.keys(C.floors).join(', ') + '.',
-    '- areas: ground surfaces of the plot outside the house, polygon pts plus material (' + Object.keys(C.materials).filter((k) => k !== 'lawn').join(', ') + '). Later areas draw on top. Undrawn ground is lawn, so never add lawn.',
+    '- areas: ground surfaces of the plot outside the house, polygon pts plus material (' + Object.entries(C.materials).filter(([k]) => k !== 'lawn').map(([k, d]) => k + ' = ' + d.label).join(', ') + '). Use asphalt, crushed, dirt or cobble for roads and driveways, and flagstone, setts, brick, pebbles, granite or pavers for paths, as fits the style. Later areas draw on top. Undrawn ground is lawn, so never add lawn.',
     '  floor_color and wall_color: "#rrggbb" for that room\'s floor finish and wall paint, or "" for the defaults (floor type\'s standard colour, the house paint).',
     '- look: the house style and roof. style ' + Object.keys(C.styles).join(', ') + ' sets the exterior, roof, doors, windows, paint and floors in one go; "keep" leaves it.',
     '  roof (' + Object.keys(C.roofs).join(', ') + '), roofing (' + Object.keys(C.roofMaterials).join(', ') + '), wall_finish (' + Object.keys(C.wallFinishes).join(', ') + ') or "keep"; roof_color, exterior_color, paint (house wall paint) "#rrggbb" or "".',
     '- plants: trunk x, y and canopy radius r; kind ' + Object.keys(C.plants).join(', ') + '.',
+    '- fences: straight runs from (x1, y1) to (x2, y2), outside the house; kind ' + Object.entries(C.fences).map(([k, d]) => k + ' (' + d.label + ', default height ' + d.h + ' m)').join(' or ') + '; h is the height in metres (0.3 to 3.6); color "#rrggbb" or "" for the default. Chain runs end to end to go round a corner. Put a gate on the run where one belongs instead of leaving a gap.',
+    '- gates: sit on a fence run and cut it open. fence is the id of that run, pos the metres from the run start (x1, y1) to the centre of the gate, w its width, h its height, kind ' + Object.entries(C.gates).map(([k, d]) => k + ' (' + d.label + ', ' + d.w + ' m wide)').join(', ') + '; swing 1 or -1 is the side it opens to, hinge start or end, color "#rrggbb" or "" for the default. Use a driveway or double gate where a car enters.',
     '- items: furniture centre x, y; w along x and h along y before rotation; rot 0, 90, 180 or 270 clockwise. At rot 0 the back (headboard, sofa back, counter back) is on the north edge.',
     '  kinds and typical sizes: ' + Object.entries(C.items).map(([k, d]) => k + ' ' + d.w + '×' + d.h).join(', ') + '.',
+    '  Outdoor site items (x, y is the centre, w and h are free, rot in degrees): ' + Object.entries(C.items).filter(([, d]) => d.layer === 'landscape').map(([k, d]) => k + ' (' + d.label + ', typically ' + d.w + '×' + d.h + ')').join(', ') + '. Put them on open ground outside the house, clear of walls, fences and each other; never inside a room. Size a soccer field or court to the space left on the plot.',
     '',
     'QUALITY',
     '- Exterior walls form a closed outline around all indoor rooms. Walls run along every room outline, except open-plan joins, which get no wall or an "opening".',
@@ -223,6 +226,8 @@ window.FP = window.FP || {};
       look: { style: p.settings.style.preset, roof: p.settings.roof.type, roofing: p.settings.roof.material, roof_color: p.settings.roof.color, wall_finish: p.settings.style.finish, exterior_color: p.settings.style.extColor, paint: p.settings.style.wall },
       areas: p.areas.map((a) => ({ id: a.id, name: a.name, material: a.material, pts: a.pts.map((q) => [r2(q.x), r2(q.y)]) })),
       plants: p.plants.map((pl) => ({ id: pl.id, kind: pl.kind, x: r2(pl.x), y: r2(pl.y), r: pl.r })),
+      fences: p.fences.map((fe) => ({ id: fe.id, kind: fe.kind, x1: r2(fe.x1), y1: r2(fe.y1), x2: r2(fe.x2), y2: r2(fe.y2), h: fe.h, color: fe.color || '' })),
+      gates: p.gates.map((g) => ({ id: g.id, fence: g.fence, pos: r2(g.pos), w: g.w, h: g.h, kind: g.kind, swing: g.swing || 1, hinge: g.hinge || 'start', color: g.color || '' })),
       items: p.items.map((it) => ({ id: it.id, kind: it.kind, x: r2(it.x), y: r2(it.y), w: it.w, h: it.h, rot: it.rot || 0 }))
     };
   }
@@ -242,6 +247,8 @@ window.FP = window.FP || {};
       look: obj({ style: en(['keep'].concat(Object.keys(C.styles))), roof: en(['keep'].concat(Object.keys(C.roofs))), roofing: en(['keep'].concat(Object.keys(C.roofMaterials))), wall_finish: en(['keep'].concat(Object.keys(C.wallFinishes))), roof_color: s, exterior_color: s, paint: s }),
       areas: { type: 'array', items: obj({ id: s, name: s, material: en(Object.keys(C.materials).filter((k) => k !== 'lawn')), pts: poly }) },
       plants: { type: 'array', items: obj({ id: s, kind: en(Object.keys(C.plants)), x: n, y: n, r: n }) },
+      fences: { type: 'array', items: obj({ id: s, kind: en(Object.keys(C.fences)), x1: n, y1: n, x2: n, y2: n, h: n, color: s }) },
+      gates: { type: 'array', items: obj({ id: s, fence: s, pos: n, w: n, h: n, kind: en(Object.keys(C.gates)), swing: n, hinge: en(['start', 'end']), color: s }) },
       items: { type: 'array', items: obj({ id: s, kind: en(Object.keys(C.items)), x: n, y: n, w: n, h: n, rot: n }) }
     });
   }
@@ -361,6 +368,31 @@ window.FP = window.FP || {};
       next.plants = data.plants.filter((pl) => C.plants[pl.kind] && [pl.x, pl.y, pl.r].every(fin))
         .map((pl) => ({ id: idOf(pl.id, 'p'), kind: pl.kind, x: G.round(pl.x), y: G.round(pl.y), r: G.round(Math.max(0.15, Math.min(8, pl.r)), 2) }));
     }
+    if (take('fences')) {
+      next.fences = (data.fences || []).filter((fe) => C.fences[fe.kind] && [fe.x1, fe.y1, fe.x2, fe.y2].every(fin) && Math.hypot(fe.x2 - fe.x1, fe.y2 - fe.y1) > 0.05)
+        .map((fe) => {
+          const o = { id: idOf(fe.id, 'f'), kind: fe.kind, x1: G.round(fe.x1), y1: G.round(fe.y1), x2: G.round(fe.x2), y2: G.round(fe.y2), h: G.round(Math.max(0.3, Math.min(3.6, fin(fe.h) && fe.h > 0 ? fe.h : C.fences[fe.kind].h)), 2) };
+          if (HEX.test(fe.color)) o.color = fe.color.toLowerCase();
+          return o;
+        });
+    }
+    if (take('gates')) {
+      next.gates = (data.gates || []).filter((g) => C.gates[g.kind] && typeof g.fence === 'string' && [g.pos, g.w].every(fin))
+        .map((g) => {
+          const d = C.gates[g.kind], o = {
+            id: idOf(g.id, 'g'), fence: g.fence, pos: G.round(g.pos), w: G.round(Math.max(0.4, Math.min(8, g.w))),
+            h: G.round(Math.max(0.4, Math.min(3.6, fin(g.h) && g.h > 0 ? g.h : d.h)), 2), kind: g.kind, swing: g.swing < 0 ? -1 : 1, hinge: g.hinge === 'end' ? 'end' : 'start'
+          };
+          if (HEX.test(g.color)) o.color = g.color.toLowerCase();
+          return o;
+        });
+    }
+    {
+      // a gate needs its fence run: drop any whose run is gone, and keep the rest on it
+      const ids = new Set((next.fences || []).map((fe) => fe.id));
+      next.gates = (next.gates || []).filter((g) => ids.has(g.fence));
+      for (const g of next.gates) M.clampGate(next, g);
+    }
     if (take('items')) {
       next.items = data.items.filter((it) => C.items[it.kind] && [it.x, it.y, it.w, it.h].every(fin))
         .map((it) => ({ id: idOf(it.id, 'i'), kind: it.kind, x: G.round(it.x), y: G.round(it.y), w: G.round(Math.max(0.15, Math.min(8, it.w))), h: G.round(Math.max(0.15, Math.min(8, it.h))), rot: (((Math.round((fin(it.rot) ? it.rot : 0) / 90) * 90) % 360) + 360) % 360 }));
@@ -369,7 +401,9 @@ window.FP = window.FP || {};
   }
 
   // Key-order-independent JSON, so re-serialised entities compare equal.
+  // Numbers compare at 1 cm, so Claude re-rounding an untouched coordinate does not count as a change.
   function canon(v) {
+    if (typeof v === 'number' && isFinite(v)) return String(Math.round(v * 100) / 100);
     if (Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
     if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}';
     return JSON.stringify(v);
@@ -378,9 +412,9 @@ window.FP = window.FP || {};
   // What changed between two projects, by id.
   function diff(a, b) {
     const out = { lists: {}, changedIds: new Set(), total: 0 };
-    for (const key of ['walls', 'openings', 'rooms', 'areas', 'plants', 'items']) {
-      const before = new Map(a[key].map((e) => [e.id, canon(e)]));
-      const after = new Map(b[key].map((e) => [e.id, canon(e)]));
+    for (const key of ['walls', 'openings', 'rooms', 'areas', 'plants', 'fences', 'gates', 'items']) {
+      const before = new Map((a[key] || []).map((e) => [e.id, canon(e)]));
+      const after = new Map((b[key] || []).map((e) => [e.id, canon(e)]));
       const d = { added: 0, removed: 0, changed: 0 };
       for (const [id, v] of after) {
         if (!before.has(id)) { d.added++; out.changedIds.add(id); } else if (before.get(id) !== v) { d.changed++; out.changedIds.add(id); }
@@ -404,5 +438,104 @@ window.FP = window.FP || {};
     return { project: M.normalize(next), counts };
   }
 
-  FP.claude = { buildRequest, apply, buildDesignRequest, buildImageRequest, proposal, diff, furnishProposal };
+  /* ---------- import a house: where should it go? ---------- */
+  function placeSchema() {
+    return { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, rotation: { type: 'integer', enum: [0, 90, 180, 270] }, note: { type: 'string' } }, required: ['x', 'y', 'rotation', 'note'] };
+  }
+  // target: the plot being landscaped; src: the house design to bring in; o: { instruction }
+  function buildPlaceRequest(target, src, o) {
+    const fp = M.houseFootprint(src), here = M.houseFootprint(target);
+    const sides = M.SIDES;
+    const turns = {};
+    for (const r of [0, 90, 180, 270]) turns[r] = Object.assign({ footprint_w: r2(M.turnedSize(fp, r).w), footprint_h: r2(M.turnedSize(fp, r).h) }, Object.fromEntries(sides.map((s) => [s + '_side_of_house_ends_up_facing', M.turnSide(s, r)])));
+    const rooms = src.rooms.map((r) => { const b = G.bbox(r.pts); return { name: r.name, kind: r.kind, use: r.use, side_of_house: M.sideOf(fp, { x: b.x + b.w / 2, y: b.y + b.h / 2 }) }; });
+    const data = {
+      plot: { w: target.lot.w, h: target.lot.h },
+      house_to_place: {
+        name: src.name, footprint_w: r2(fp.w), footprint_h: r2(fp.h),
+        exterior_door_sides: M.doorSides(src, fp), rooms,
+        facing_after_each_rotation: turns
+      },
+      already_on_plot: {
+        existing_building_footprint: here ? { x: r2(here.x), y: r2(here.y), w: r2(here.w), h: r2(here.h) } : null,
+        surfaces: target.areas.map((a) => { const b = G.bbox(a.pts); return { name: a.name, material: a.material, x: r2(b.x), y: r2(b.y), w: r2(b.w), h: r2(b.h) }; }),
+        plants: target.plants.map((pl) => ({ kind: pl.kind, x: r2(pl.x), y: r2(pl.y), r: pl.r })),
+        fences: target.fences.map((fe) => ({ kind: fe.kind, x1: r2(fe.x1), y1: r2(fe.y1), x2: r2(fe.x2), y2: r2(fe.y2) }))
+      }
+    };
+    const prompt = [
+      'TASK: decide where a finished house goes on a plot that is being landscaped, and which way it faces.',
+      '',
+      'COORDINATES: metres. x grows east (right), y grows south (down). North is up, the plot runs from (0, 0) to (plot.w, plot.h).',
+      'ROTATION turns the whole house clockwise by 0, 90, 180 or 270 degrees. "facing_after_each_rotation" lists the footprint size and where each side of the house ends up for every rotation.',
+      'RETURN x, y = the top-left corner of the house footprint AFTER rotation (its outer wall faces), and the rotation.',
+      '',
+      'RULES',
+      '- The whole footprint stays inside the plot: 0 <= x, x + footprint_w <= plot.w, 0 <= y, y + footprint_h <= plot.h, using the footprint size for the rotation you choose.',
+      '- Do not overlap the existing building, ground surfaces such as pools, decks or paths, or fences. Plants standing where the house lands are removed, so prefer clear ground, but never aim at a tree on purpose.',
+      '- Unless the owner says otherwise, keep at least 3 m between the house and the plot edges.',
+      '- The owner says which side the street is on. If they do not, infer it from a driveway or path that reaches a plot edge; if that is unclear too, assume the street is the south edge.',
+      '- By default the main entrance (the first exterior_door_sides entry) faces the street.',
+      '- Round x and y to 0.05. "note": one short sentence in plain language saying where the house goes and which way its entrance and main rooms face.',
+      '',
+      'DATA (JSON):',
+      JSON.stringify(data),
+      '',
+      "OWNER'S INSTRUCTION:",
+      o.instruction
+    ].join('\n');
+    return { system: 'You are an experienced architect and site planner. Reply only with data matching the JSON schema.', prompt, schema: placeSchema(), timeoutSec: 180 };
+  }
+  // Check Claude's answer and keep the house on the plot.
+  function placement(target, src, data) {
+    const fp = M.houseFootprint(src), fin = (v) => typeof v === 'number' && isFinite(v);
+    let rot = [0, 90, 180, 270].includes(data.rotation) ? data.rotation : 0;
+    let s = M.turnedSize(fp, rot);
+    if ((s.w > target.lot.w || s.h > target.lot.h) && !(M.turnedSize(fp, rot + 90).w > target.lot.w || M.turnedSize(fp, rot + 90).h > target.lot.h)) { rot = (rot + 90) % 360; s = M.turnedSize(fp, rot); }
+    const clamp = (v, hi) => G.round(Math.max(0, Math.min(Math.max(0, hi), fin(v) ? v : 0)), 2);
+    return { x: clamp(data.x, target.lot.w - s.w), y: clamp(data.y, target.lot.h - s.h), rot, note: String(data.note || '') };
+  }
+
+  /* ---------- chat: talk to Claude about the design, and let it edit the design when asked ---------- */
+  const CHAT_SYSTEM = 'You are Claude, the design assistant built into Floorplan Studio, a desktop app for designing a house and the plot it stands on. ' +
+    'You chat with the owner: you answer questions about their design, architecture, building, furnishing and landscaping in plain, friendly language, ' +
+    'and when they ask for a change you edit the design. The app draws plans and renders straight from your numbers, so edits must be precise. ' +
+    'Reply only with data matching the JSON schema.';
+
+  function chatSchema() {
+    return { type: 'object', properties: { reply: { type: 'string' }, design: designSchema() }, required: ['reply'] };
+  }
+
+  // o: { message, history: [{ role: 'user' | 'assistant', text }], selection: { kind, name, id } | null }
+  function buildChatRequest(p, o) {
+    const st = M.stats(p);
+    const history = (o.history || []).slice(-12).map((m) => (m.role === 'user' ? 'OWNER: ' : 'YOU: ') + String(m.text || '').slice(0, 1500));
+    const sel = o.selection ? 'The owner currently has this selected in the app: ' + o.selection.kind + (o.selection.name ? ' "' + o.selection.name + '"' : '') + ' (id ' + o.selection.id + '). "This", "it" or "here" most likely means that.' : 'Nothing is selected in the app.';
+    const prompt = [
+      'HOW TO ANSWER',
+      '- "reply": your message to the owner. Plain text, friendly and short (usually 1 to 5 sentences; a short list is fine). No markdown headings, no code, never mention JSON, ids or the schema: call things by their room names.',
+      '- Questions, opinions, advice, measurements: answer from the real numbers in the project below and leave "design" out entirely.',
+      '- Change requests ("make", "move", "add", "widen", "change", "remove", "furnish", "yes, do it"): include "design" with the edit, and say in "reply" what you changed. Do the sensible thing instead of asking when the request is clear enough.',
+      '- If a request is ambiguous, risky or could go several ways, ask one short question in "reply" and leave "design" out.',
+      '- If a change would break something (a room too small, no door, outside the lot), say so, and either do the closest sound version or ask.',
+      '- Never say you changed something unless "design" contains that change. Everything you change is shown to the owner and can be undone.',
+      '- Inside "design": change only what the request needs and keep everything else exactly as it is, with the same ids and numbers. Return each list you change in full (including its untouched entries); name the lists you did not touch in "unchanged" and return those as empty lists. "summary" is one plain sentence about the change. If walls move, keep room outlines, openings and furniture consistent with them.',
+      '',
+      sel,
+      '',
+      'AREAS (clear floor inside the walls): indoor ' + r2(st.indoor) + ' m², covered ' + r2(st.covered) + ' m², outdoor rooms ' + r2(st.outdoor) + ' m²; lot ' + r2(st.lot) + ' m².',
+      '',
+      history.length ? 'CONVERSATION SO FAR:\n' + history.join('\n') : 'This is the start of the conversation.',
+      '',
+      'OWNER\'S NEW MESSAGE:',
+      o.message,
+      '',
+      MODEL_RULES,
+      '',
+      'CURRENT PROJECT (JSON):\n' + JSON.stringify(compact(p))
+    ].join('\n');
+    return { system: CHAT_SYSTEM, prompt, schema: chatSchema(), timeoutSec: 900 };
+  }
+
+  FP.claude = { buildPlaceRequest, placement, buildRequest, buildChatRequest, apply, buildDesignRequest, buildImageRequest, proposal, diff, furnishProposal };
 })();

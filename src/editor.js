@@ -4,13 +4,16 @@ window.FP = window.FP || {};
 
 (function () {
   const G = FP.geom, M = FP.model, C = FP.catalog;
-  const LAYER_OF = { wall: 'house', opening: 'house', room: 'house', item: 'furniture', area: 'landscape', plant: 'landscape' };
+  // Pools, quinchos and sports fields are items that sit in the landscape layer.
+  const layerOf = (k, id) => (k === 'item' ? ((FP.catalog.items[(FP.model.find(FP.app.shownProject(), 'item', id) || {}).kind] || {}).layer || 'furniture') : LAYER_OF[k]);
+  const LAYER_OF = { wall: 'house', opening: 'house', room: 'house', item: 'furniture', area: 'landscape', plant: 'landscape', fence: 'landscape', gate: 'landscape' };
   const BASE_SCALE = 30; // px per metre shown as 100%
 
   let svg, sceneEl, overlayEl, defsEl, stage, hud;
   const V = { x: -3, y: -3, s: BASE_SCALE };
   let T = {};        // transient tool state (wall chain, rectangle, ghost...)
   let drag = null;   // active pointer gesture
+  let marks = [];    // pinned laser readings and measured areas (not saved with the design)
   let hover = null;  // entity under the cursor in select mode
   let cursor = null; // last pointer position in world units
   const mods = { shift: false, alt: false, space: false };
@@ -84,6 +87,18 @@ window.FP = window.FP || {};
       const Q = (pt, k) => ({ x: pt.x + g.v.nx * k, y: pt.y + g.v.ny * k });
       return '<polygon points="' + ptsAttr([Q(g.s, -h), Q(g.e, -h), Q(g.e, h), Q(g.s, h)]) + '" stroke-width="' + f(sw) + '"' + st + '/>';
     }
+    if (sel.k === 'gate') {
+      const g = M.gateGeo(p, e);
+      if (!g) return '';
+      const Q = (pt, k) => ({ x: pt.x + g.v.nx * k, y: pt.y + g.v.ny * k });
+      const k = 0.2 + px(2);
+      return '<polygon points="' + ptsAttr([Q(g.s, -k), Q(g.e, -k), Q(g.e, k), Q(g.s, k)]) + '" stroke-width="' + f(sw) + '"' + st + '/>';
+    }
+    if (sel.k === 'fence') {
+      const L = Math.hypot(e.x2 - e.x1, e.y2 - e.y1) || 1e-9, ux = (e.x2 - e.x1) / L, uy = (e.y2 - e.y1) / L, h = 0.12 + px(2);
+      const Q = (d, k) => ({ x: e.x1 + ux * d - uy * k, y: e.y1 + uy * d + ux * k });
+      return '<polygon points="' + ptsAttr([Q(-h, -h), Q(L + h, -h), Q(L + h, h), Q(-h, h)]) + '" stroke-width="' + f(sw) + '"' + st + '/>';
+    }
     if (sel.k === 'plant') return '<circle cx="' + f(e.x) + '" cy="' + f(e.y) + '" r="' + f(e.r + px(3)) + '" stroke-width="' + f(sw) + '"' + st + '/>';
     if (sel.k === 'item') {
       return '<rect x="' + f(-e.w / 2) + '" y="' + f(-e.h / 2) + '" width="' + f(e.w) + '" height="' + f(e.h) + '" transform="translate(' + f(e.x) + ' ' + f(e.y) + ') rotate(' + f(e.rot || 0) + ')" stroke-width="' + f(sw) + '"' + st + '/>';
@@ -96,7 +111,7 @@ window.FP = window.FP || {};
     if (!e) return '';
     const hs = px(4.5);
     const sq = (x, y, i) => '<rect data-h="' + i + '" x="' + f(x - hs) + '" y="' + f(y - hs) + '" width="' + f(hs * 2) + '" height="' + f(hs * 2) + '" rx="' + f(px(1.5)) + '" stroke-width="' + f(px(1.5)) + '"' + style('fill:var(--panel);stroke:var(--accent);cursor:move') + '/>';
-    if (sel.k === 'wall') return sq(e.x1, e.y1, 1) + sq(e.x2, e.y2, 2);
+    if (sel.k === 'wall' || sel.k === 'fence') return sq(e.x1, e.y1, 1) + sq(e.x2, e.y2, 2);
     if (sel.k === 'room' || sel.k === 'area') return e.pts.map((q, i) => sq(q.x, q.y, i)).join('');
     if (sel.k === 'plant') return sq(e.x + e.r, e.y, 'r');
     return '';
@@ -112,7 +127,13 @@ window.FP = window.FP || {};
     for (const r of q.rooms.concat(q.areas)) if (ids.has(r.id)) s += '<polygon points="' + ptsAttr(r.pts) + '" stroke-width="' + sw + '" stroke-dasharray="' + f(px(6)) + ' ' + f(px(4)) + '"' + st2 + '/>';
     for (const w of q.walls) if (ids.has(w.id)) s += '<line x1="' + f(w.x1) + '" y1="' + f(w.y1) + '" x2="' + f(w.x2) + '" y2="' + f(w.y2) + '" stroke-width="' + f(w.t + px(6)) + '"' + style('stroke:var(--accent);opacity:.35') + '/>';
     for (const it of q.items) if (ids.has(it.id)) s += '<rect x="' + f(-it.w / 2) + '" y="' + f(-it.h / 2) + '" width="' + f(it.w) + '" height="' + f(it.h) + '" transform="translate(' + f(it.x) + ' ' + f(it.y) + ') rotate(' + f(it.rot || 0) + ')" stroke-width="' + sw + '"' + style('stroke:var(--accent);fill:none') + '/>';
+    for (const fe of q.fences || []) if (ids.has(fe.id)) s += '<line x1="' + f(fe.x1) + '" y1="' + f(fe.y1) + '" x2="' + f(fe.x2) + '" y2="' + f(fe.y2) + '" stroke-width="' + f(0.2) + '"' + style('stroke:var(--accent);opacity:.35') + '/>';
     for (const pl of q.plants) if (ids.has(pl.id)) s += '<circle cx="' + f(pl.x) + '" cy="' + f(pl.y) + '" r="' + f(pl.r) + '" stroke-width="' + sw + '"' + style('stroke:var(--accent);fill:none') + '/>';
+    for (const gt of q.gates || []) {
+      if (!ids.has(gt.id)) continue;
+      const g = M.gateGeo(q, gt);
+      if (g) s += '<circle cx="' + f(g.c.x) + '" cy="' + f(g.c.y) + '" r="' + f(gt.w / 2 + 0.15) + '" stroke-width="' + sw + '"' + style('stroke:var(--accent);fill:none') + '/>';
+    }
     for (const o of q.openings) {
       if (!ids.has(o.id)) continue;
       const g = M.openingGeo(q, o);
@@ -125,12 +146,70 @@ window.FP = window.FP || {};
     if (!overlayEl) return;
     const st = S();
     if (st.preview) { overlayEl.innerHTML = previewOutlines(); updateHud(); return; }
-    let s = '';
-    if (st.tool === 'select' && hover && !(st.sel && st.sel.id === hover.id)) s += outline(hover, false);
+    let s = marksSvg();
+    if (st.tool === 'select' && hover && !(st.sel && st.sel.id === hover.id) && !st.multi.some((r) => r.id === hover.id)) {
+      const hg = M.groupOf(P(), hover);
+      for (const r of hg ? hg.members : [hover]) s += outline(r, false);
+    }
     if (st.sel) s += outline(st.sel, true) + handles(st.sel);
+    if (st.multi.length) s += multiOverlay();
+    if (T.box) s += marqueeSvg();
     s += toolPreview();
     overlayEl.innerHTML = s;
     updateHud();
+  }
+
+  const escTxt = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  // Outline of every selected thing, plus a dashed box around them all with a count or the group's name.
+  function multiOverlay() {
+    const p = P(), refs = S().multi;
+    let s = '';
+    for (const r of refs) s += outline(r, true);
+    const b = M.selBox(p, refs);
+    if (!b) return s;
+    const pad = px(6), g = A().isGroupSel();
+    s += '<rect x="' + f(b.x0 - pad) + '" y="' + f(b.y0 - pad) + '" width="' + f(b.x1 - b.x0 + 2 * pad) + '" height="' + f(b.y1 - b.y0 + 2 * pad) + '" rx="' + f(px(4)) + '" stroke-width="' + f(px(1.5)) + '" stroke-dasharray="' + f(px(6)) + ' ' + f(px(4)) + '"' + style('stroke:var(--accent);fill:none') + '/>';
+    s += label((b.x0 + b.x1) / 2, b.y0 - pad - px(8), escTxt(g ? g.name + ' (' + refs.length + ' parts)' : refs.length + ' selected'));
+    return s;
+  }
+  function marqueeSvg() {
+    const b = T.box, x = Math.min(b.a.x, b.b.x), y = Math.min(b.a.y, b.b.y), w = Math.abs(b.b.x - b.a.x), h = Math.abs(b.b.y - b.a.y);
+    const crossing = b.b.x < b.a.x;
+    return '<rect x="' + f(x) + '" y="' + f(y) + '" width="' + f(w) + '" height="' + f(h) + '" stroke-width="' + f(px(1.5)) + '"' + (crossing ? ' stroke-dasharray="' + f(px(5)) + ' ' + f(px(3)) + '"' : '') + style('stroke:var(--accent);fill:color-mix(in srgb, var(--accent) 9%, transparent)') + '/>';
+  }
+
+  // What a box selects: left to right takes what lies fully inside; right to left takes anything it touches.
+  // Anything in a group brings its whole group along.
+  function marqueeRefs(box) {
+    const p = P(), L = S().layers;
+    const x0 = Math.min(box.a.x, box.b.x), x1 = Math.max(box.a.x, box.b.x), y0 = Math.min(box.a.y, box.b.y), y1 = Math.max(box.a.y, box.b.y);
+    const crossing = box.b.x < box.a.x;
+    const out = new Map();
+    for (const k of Object.keys(M.LISTS)) {
+      for (const e of M.list(p, k)) {
+        const layer = L[layerOf(k, e.id)];
+        if (!layer || !layer.visible || layer.locked) continue;
+        const b = M.refBox(p, { k, id: e.id });
+        if (!b) continue;
+        let hit;
+        if (!crossing) hit = b.x0 >= x0 && b.x1 <= x1 && b.y0 >= y0 && b.y1 <= y1;
+        else {
+          hit = b.x0 <= x1 && b.x1 >= x0 && b.y0 <= y1 && b.y1 >= y0;
+          // a box drawn inside a big lawn or room should not grab the lawn or room itself
+          if (hit && (k === 'room' || k === 'area') && b.x0 <= x0 && b.x1 >= x1 && b.y0 <= y0 && b.y1 >= y1) hit = false;
+        }
+        if (hit) out.set(k + ':' + e.id, { k, id: e.id });
+      }
+    }
+    for (const r of [...out.values()]) {
+      const g = M.groupOf(p, r);
+      if (g) for (const m of g.members) out.set(M.keyOf(m), m);
+    }
+    return [...out.values()];
+  }
+  function selectAll() {
+    if (S().mode === '3d') return A().toast('Switch to Plan to select several things at once.');
+    A().selectMany(marqueeRefs({ a: { x: -1e6, y: -1e6 }, b: { x: 1e6, y: 1e6 } }));
   }
 
   function toolPreview() {
@@ -142,6 +221,12 @@ window.FP = window.FP || {};
       const a = T.pts[T.pts.length - 1], b = T.target;
       s += '<polyline points="' + ptsAttr(T.pts) + '" stroke-width="' + f(px(1)) + '"' + acc + ' stroke-dasharray="' + f(px(4)) + ' ' + f(px(3)) + '"/>';
       s += '<line x1="' + f(a.x) + '" y1="' + f(a.y) + '" x2="' + f(b.x) + '" y2="' + f(b.y) + '" stroke-width="' + f(o.wallT) + '"' + style('stroke:var(--accent);opacity:.45') + '/>';
+      s += label((a.x + b.x) / 2, (a.y + b.y) / 2 - px(10), FP.draw.fm(G.len(a, b)) + ' m');
+    }
+    if (st.tool === 'fence' && T.pts && T.pts.length && T.target) {
+      const a = T.pts[T.pts.length - 1], b = T.target;
+      s += '<polyline points="' + ptsAttr(T.pts) + '" stroke-width="' + f(px(1)) + '"' + acc + ' stroke-dasharray="' + f(px(4)) + ' ' + f(px(3)) + '"/>';
+      s += '<line x1="' + f(a.x) + '" y1="' + f(a.y) + '" x2="' + f(b.x) + '" y2="' + f(b.y) + '" stroke-width="0.12"' + style('stroke:var(--accent);opacity:.5') + '/>';
       s += label((a.x + b.x) / 2, (a.y + b.y) / 2 - px(10), FP.draw.fm(G.len(a, b)) + ' m');
     }
     if ((st.tool === 'room' || st.tool === 'area') && T.a && T.b) {
@@ -164,8 +249,19 @@ window.FP = window.FP || {};
       const Q = (pt, k) => ({ x: pt.x + g.v.nx * k, y: pt.y + g.v.ny * k });
       s += '<polygon points="' + ptsAttr([Q(g.s, -h), Q(g.e, -h), Q(g.e, h), Q(g.s, h)]) + '" stroke-width="' + f(px(1.5)) + '"' + style('stroke:var(--accent);fill:color-mix(in srgb, var(--accent) 35%, transparent)') + '/>';
     }
+    if (st.tool === 'gate' && T.gate) {
+      const g = T.gate, Q = (pt, k) => ({ x: pt.x + g.v.nx * k, y: pt.y + g.v.ny * k });
+      s += '<polygon points="' + ptsAttr([Q(g.s, -0.25), Q(g.e, -0.25), Q(g.e, 0.25), Q(g.s, 0.25)]) + '" stroke-width="' + f(px(1.5)) + '"' + style('stroke:var(--accent);fill:color-mix(in srgb, var(--accent) 25%, transparent)') + '/>';
+      s += '<g opacity=".85">' + FP.draw.gateSvg(P(), g.g, false) + '</g>';
+      s += label(g.c.x, g.c.y - 0.55 - px(8), FP.draw.fm(g.g.w) + ' m');
+    }
     if (st.tool === 'item' && T.ghost) s += '<g opacity=".7">' + FP.draw.itemSvg(T.ghost) + '</g>';
     if (st.tool === 'plant' && T.ghost) s += '<g opacity=".7">' + FP.draw.plantSvg(T.ghost, st.mode === 'render') + '</g>';
+    if (st.tool === 'laser' && T.laser) s += laserSvg(T.laser, true);
+    if (st.tool === 'zone' && T.a && T.b) {
+      const x = Math.min(T.a.x, T.b.x), y = Math.min(T.a.y, T.b.y);
+      s += rectSvg({ x, y, w: Math.abs(T.b.x - T.a.x), h: Math.abs(T.b.y - T.a.y) }, true);
+    }
     if (T.dragLabel) s += label(T.dragLabel.x, T.dragLabel.y - px(14), T.dragLabel.text);
     if (st.tool === 'measure' && T.a && T.b) {
       s += '<line x1="' + f(T.a.x) + '" y1="' + f(T.a.y) + '" x2="' + f(T.b.x) + '" y2="' + f(T.b.y) + '" stroke-width="' + f(px(2)) + '"' + acc + '/>';
@@ -182,6 +278,69 @@ window.FP = window.FP || {};
     hud.textContent = c + (c ? '   ·   ' : '') + (g ? 'snap ' + (g < 1 ? Math.round(g * 100) + ' cm' : g + ' m') : 'snap off') + (mods.alt ? '   ·   snapping off' : '');
   }
 
+  /* ---------- laser measure & area marks ---------- */
+  // Everything a laser beam stops at: walls and fences always, trees and furniture when asked.
+  function beamSegments(all) {
+    const p = P(), segs = [];
+    const poly = (pts) => pts.forEach((a, i) => segs.push([a, pts[(i + 1) % pts.length]]));
+    poly([{ x: 0, y: 0 }, { x: p.lot.w, y: 0 }, { x: p.lot.w, y: p.lot.h }, { x: 0, y: p.lot.h }]);
+    for (const w of p.walls) {
+      const v = M.wallVec(w), h = w.t / 2, Q = (d, k) => ({ x: v.a.x + v.ux * d + v.nx * k, y: v.a.y + v.uy * d + v.ny * k });
+      poly([Q(0, -h), Q(v.L, -h), Q(v.L, h), Q(0, h)]);
+    }
+    for (const fe of p.fences) {
+      const L = Math.hypot(fe.x2 - fe.x1, fe.y2 - fe.y1) || 1e-9, ux = (fe.x2 - fe.x1) / L, uy = (fe.y2 - fe.y1) / L, h = 0.06;
+      const Q = (d, k) => ({ x: fe.x1 + ux * d - uy * k, y: fe.y1 + uy * d + ux * k });
+      poly([Q(0, -h), Q(L, -h), Q(L, h), Q(0, h)]);
+    }
+    if (all) {
+      for (const pl of p.plants) { const n = 16; poly(Array.from({ length: n }, (_, i) => ({ x: pl.x + Math.cos((i * 2 * Math.PI) / n) * pl.r, y: pl.y + Math.sin((i * 2 * Math.PI) / n) * pl.r }))); }
+      for (const it of p.items) {
+        const a = ((it.rot || 0) * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+        poly([[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => ({ x: it.x + (sx * it.w / 2) * ca - (sy * it.h / 2) * sa, y: it.y + (sx * it.w / 2) * sa + (sy * it.h / 2) * ca })));
+      }
+    }
+    return segs;
+  }
+  // Distance from c along unit (dx, dy) to the first segment it meets; null if none.
+  function beam(c, dx, dy, segs) {
+    let best = null;
+    for (const [a, b] of segs) {
+      const ex = b.x - a.x, ey = b.y - a.y, den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-9) continue;
+      const t = ((a.x - c.x) * ey - (a.y - c.y) * ex) / den, u = ((a.x - c.x) * dy - (a.y - c.y) * dx) / den;
+      if (t >= 0 && u >= -1e-9 && u <= 1 + 1e-9 && (best === null || t < best)) best = t;
+    }
+    return best;
+  }
+  // The gap through point c, sideways and up and down.
+  function laserAt(c) {
+    const p = P(), segs = beamSegments(S().opts.laserAll);
+    if (c.x < 0 || c.y < 0 || c.x > p.lot.w || c.y > p.lot.h) return null;
+    const g = (dx, dy) => { const d = beam(c, dx, dy, segs); return d == null ? 0 : d; };
+    return { c: { x: c.x, y: c.y }, l: g(-1, 0), r: g(1, 0), u: g(0, -1), d: g(0, 1) };
+  }
+  function laserSvg(m, live) {
+    const col = '#e5484d', c = m.c, w = px(live ? 1.5 : 2);
+    const line = (x1, y1, x2, y2) => '<line x1="' + f(x1) + '" y1="' + f(y1) + '" x2="' + f(x2) + '" y2="' + f(y2) + '" stroke-width="' + f(w) + '"' + style('stroke:' + col + (live ? ';opacity:.85' : '')) + '/>';
+    const dot = (x, y, r) => '<circle cx="' + f(x) + '" cy="' + f(y) + '" r="' + f(px(r)) + '"' + style('fill:' + col) + '/>';
+    const tick = (x, y, horiz) => horiz ? line(x, y - px(6), x, y + px(6)) : line(x - px(6), y, x + px(6), y);
+    let s = '';
+    if (m.l + m.r > 0.01) { s += line(c.x - m.l, c.y, c.x + m.r, c.y) + tick(c.x - m.l, c.y, true) + tick(c.x + m.r, c.y, true) + label(c.x + (m.r - m.l) / 2, c.y - px(10), FP.draw.fm(m.l + m.r) + ' m'); }
+    if (m.u + m.d > 0.01) { s += line(c.x, c.y - m.u, c.x, c.y + m.d) + tick(c.x, c.y - m.u, false) + tick(c.x, c.y + m.d, false) + label(c.x + px(34), c.y + (m.d - m.u) / 2 + px(4), FP.draw.fm(m.u + m.d) + ' m'); }
+    return s + dot(c.x, c.y, live ? 3.5 : 4.5);
+  }
+  function rectSvg(r, live) {
+    const area = r.w * r.h;
+    return '<rect x="' + f(r.x) + '" y="' + f(r.y) + '" width="' + f(r.w) + '" height="' + f(r.h) + '" stroke-width="' + f(px(live ? 1.5 : 2)) + '"' + style('stroke:var(--accent);fill:color-mix(in srgb, var(--accent) ' + (live ? 12 : 18) + '%, transparent)' + (live ? ';stroke-dasharray:' + f(px(6)) + ' ' + f(px(4)) : '')) + '/>'
+      + label(r.x + r.w / 2, r.y + r.h / 2 - px(2), FP.draw.fm(r.w) + ' × ' + FP.draw.fm(r.h) + ' m')
+      + label(r.x + r.w / 2, r.y + r.h / 2 + px(14), area.toFixed(2) + ' m²');
+  }
+  function marksSvg() {
+    return marks.map((m) => (m.kind === 'laser' ? laserSvg(m, false) : rectSvg(m, false))).join('');
+  }
+  function clearMarks() { marks = []; T = {}; drawOverlay(); }
+
   /* ---------- picking & snapping ---------- */
   function pick(e) {
     const L = S().layers;
@@ -189,7 +348,7 @@ window.FP = window.FP || {};
       if (!sceneEl.contains(el)) continue;
       const g = el.closest('[data-k]');
       if (!g) continue;
-      const layer = L[LAYER_OF[g.dataset.k]];
+      const layer = L[layerOf(g.dataset.k, g.dataset.id)];
       if (!layer || !layer.visible || layer.locked) continue;
       return { k: g.dataset.k, id: g.dataset.id };
     }
@@ -199,6 +358,7 @@ window.FP = window.FP || {};
   function vertices(opt) {
     const p = P(), out = [];
     for (const w of p.walls) if (w.id !== opt.excludeWall) out.push({ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
+    for (const fe of p.fences) if (fe.id !== opt.excludeFence) out.push({ x: fe.x1, y: fe.y1 }, { x: fe.x2, y: fe.y2 });
     for (const r of p.rooms) if (r.id !== opt.excludeShape) out.push(...r.pts);
     for (const a of p.areas) if (a.id !== opt.excludeShape) out.push(...a.pts);
     out.push({ x: 0, y: 0 }, { x: p.lot.w, y: 0 }, { x: p.lot.w, y: p.lot.h }, { x: 0, y: p.lot.h });
@@ -275,6 +435,28 @@ window.FP = window.FP || {};
     return Object.assign(M.openingGeo(P(), o), { o });
   }
 
+  function nearestFence(w) {
+    const tol = Math.max(0.6, px(14));
+    let best = null;
+    for (const fe of P().fences) {
+      const pr = G.project(w, { x: fe.x1, y: fe.y1 }, { x: fe.x2, y: fe.y2 });
+      if (pr.d < tol && (!best || pr.d < best.pr.d)) best = { fe, pr };
+    }
+    return best;
+  }
+
+  // Where a gate would go: on the fence nearest the cursor, on whichever side of it the cursor is.
+  function gateGhost(w) {
+    const st = S(), n = nearestFence(w);
+    if (!n) return null;
+    const kind = st.opts.gateKind, d = C.gates[kind], width = st.opts.gateW[kind] || d.w, v = M.wallVec(n.fe);
+    if (width > v.L - 0.1) return null;
+    const pos = Math.max(width / 2, Math.min(v.L - width / 2, G.snap(n.pr.t * v.L, mods.alt ? 0 : 0.05)));
+    const swing = (w.x - n.pr.x) * v.nx + (w.y - n.pr.y) * v.ny >= 0 ? 1 : -1;
+    const g = { id: 'ghost', fence: n.fe.id, pos, w: width, h: st.opts.gateH[kind] || d.h, kind, swing, hinge: 'start' };
+    return Object.assign(M.gateGeo(P(), g), { g });
+  }
+
   /* ---------- gestures ---------- */
   function onDown(e) {
     if (e.button === 2) return;
@@ -287,6 +469,7 @@ window.FP = window.FP || {};
     switch (st.tool) {
       case 'select': return downSelect(e, w);
       case 'wall': return downWall(w);
+      case 'fence': return downFence(w);
       case 'room': case 'area': return downShape(w);
       case 'door': case 'window': {
         const g = openingGhost(w);
@@ -294,6 +477,14 @@ window.FP = window.FP || {};
         const o = Object.assign({}, g.o, { id: M.uid('o') });
         A().mutate((p) => p.openings.push(o));
         A().select({ k: 'opening', id: o.id });
+        return;
+      }
+      case 'gate': {
+        const gh = gateGhost(w);
+        if (!gh) return A().toast('Click on a fence to place the gate.');
+        const gt = Object.assign({}, gh.g, { id: M.uid('g') });
+        A().mutate((p) => p.gates.push(gt));
+        A().select({ k: 'gate', id: gt.id });
         return;
       }
       case 'plant': {
@@ -310,6 +501,16 @@ window.FP = window.FP || {};
         A().select({ k: 'item', id: it.id }, true);
         return;
       }
+      case 'laser': {
+        const m = laserAt(w);
+        if (m) { marks.push(Object.assign({ kind: 'laser' }, m)); drawOverlay(); }
+        return;
+      }
+      case 'zone':
+        T = { a: snapPoint(w) };
+        T.b = T.a;
+        drag = { type: 'zone' };
+        return;
       case 'measure':
         T = { a: snapPoint(w), b: null };
         T.b = T.a;
@@ -334,10 +535,22 @@ window.FP = window.FP || {};
       return;
     }
     const hit = pick(e);
-    if (!hit) {
-      if (st.sel) A().select(null);
-      return startPan(e);
+    const cur = A().curRefs();
+    // Shift-click (or Ctrl/Cmd-click) adds a thing to the selection or takes it out
+    const onlyThis = cur.length === 1 && cur[0].id === (hit && hit.id);
+    if (hit && (e.ctrlKey || e.metaKey || (e.shiftKey && cur.length && !onlyThis))) {
+      A().selectMany(cur.some((r) => r.id === hit.id) ? cur.filter((r) => r.id !== hit.id) : cur.concat([hit]));
+      return;
     }
+    if (!hit) {
+      // empty ground: drag a box to select several things; a plain click clears the selection
+      drag = { type: 'marquee', a: w, sx: e.clientX, sy: e.clientY, add: e.shiftKey, moved: false };
+      delete T.box;
+      return;
+    }
+    if (cur.length > 1 && cur.some((r) => r.id === hit.id)) return startMoveMany(cur, w, e);
+    const grp = M.groupOf(P(), hit);
+    if (grp) { A().selectMany(grp.members); return startMoveMany(grp.members, w, e); }
     if (!st.sel || st.sel.id !== hit.id) A().select(hit);
     const ent = M.find(P(), hit.k, hit.id);
     drag = { type: 'move', sel: hit, start: w, sx: e.clientX, sy: e.clientY, orig: JSON.parse(JSON.stringify(ent)), moved: false };
@@ -345,9 +558,54 @@ window.FP = window.FP || {};
     A().beginChange();
   }
 
+  // Dragging several things (a box selection or a group) moves them together, keeping their layout.
+  function startMoveMany(refs, w, e) {
+    const p = P();
+    const mov = refs.filter((r) => M.MOVABLE.includes(r.k));
+    const bb = M.selBox(p, mov);
+    if (!bb) return;
+    const orig = new Map();
+    for (const r of mov) orig.set(r.id, JSON.parse(JSON.stringify(M.find(p, r.k, r.id))));
+    // snap by a real corner of the first wall (else room, else anything) so drawn geometry stays on the grid
+    const ar = mov.find((r) => r.k === 'wall') || mov.find((r) => r.k === 'room' || r.k === 'area') || mov[0], ae = orig.get(ar.id);
+    const anchor = ae.pts ? ae.pts[0] : ae.x1 !== undefined ? { x: ae.x1, y: ae.y1 } : { x: ae.x, y: ae.y };
+    drag = { type: 'moveMany', mov, bb, anchor, orig, start: w, sx: e.clientX, sy: e.clientY, moved: false };
+    A().beginChange();
+  }
+  function moveMany(e, w) {
+    const d = drag, p = P();
+    if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 3) return;
+    d.moved = true;
+    const g = mods.alt ? 0 : S().snap;
+    const dx = G.snap(d.anchor.x + (w.x - d.start.x), g) - d.anchor.x, dy = G.snap(d.anchor.y + (w.y - d.start.y), g) - d.anchor.y;
+    for (const r of d.mov) {
+      const ent = M.find(p, r.k, r.id);
+      if (!ent) continue;
+      Object.assign(ent, JSON.parse(JSON.stringify(d.orig.get(r.id))));
+      M.moveEnt(r.k, ent, dx, dy);
+    }
+    M.clampGates(p);
+    const fmt = FP.draw.fm;
+    T.dragLabel = { x: (d.bb.x0 + d.bb.x1) / 2 + dx, y: d.bb.y0 + dy - px(6), text: (dx >= 0 ? '→ ' : '← ') + fmt(Math.abs(dx)) + ' m   ' + (dy >= 0 ? '↓ ' : '↑ ') + fmt(Math.abs(dy)) + ' m' };
+    A().refresh();
+  }
+
   // Things that should follow a wall when it (or one of its ends) moves:
   // coincident ends of other walls, and room/area corners lying on the wall.
   function linksFor(sel, ent, handle) {
+    if (sel.k === 'fence') {
+      // fence runs that meet at an end keep meeting when it moves
+      const out = { ends: [] };
+      const ends = handle ? [handle === '1' ? { x: ent.x1, y: ent.y1 } : { x: ent.x2, y: ent.y2 }] : [{ x: ent.x1, y: ent.y1 }, { x: ent.x2, y: ent.y2 }];
+      for (const o of P().fences) {
+        if (o.id === ent.id) continue;
+        for (const q of ends) {
+          if (Math.hypot(o.x1 - q.x, o.y1 - q.y) < 0.01) out.ends.push({ id: o.id, end: 1, x: o.x1, y: o.y1 });
+          if (Math.hypot(o.x2 - q.x, o.y2 - q.y) < 0.01) out.ends.push({ id: o.id, end: 2, x: o.x2, y: o.y2 });
+        }
+      }
+      return out;
+    }
     if (sel.k !== 'wall') return null;
     const p = P(), out = { ends: [], verts: [] };
     // Moving a straight wall moves its whole straight run; anything meeting the run follows.
@@ -387,11 +645,11 @@ window.FP = window.FP || {};
     if (!links) return;
     const p = P();
     for (const l of links.ends) {
-      const w = M.find(p, 'wall', l.id);
+      const w = M.find(p, l.fence ? 'fence' : 'wall', l.id) || M.find(p, 'fence', l.id);
       if (!w) continue;
       if (l.end === 1) { w.x1 = G.round(l.x + dx); w.y1 = G.round(l.y + dy); } else { w.x2 = G.round(l.x + dx); w.y2 = G.round(l.y + dy); }
     }
-    for (const l of links.verts) {
+    for (const l of links.verts || []) {
       const r = M.find(p, l.list, l.id);
       if (r) r.pts[l.i] = { x: G.round(l.x + dx), y: G.round(l.y + dy) };
     }
@@ -430,6 +688,16 @@ window.FP = window.FP || {};
         applyLinks(d.links, ox, oy);
         const arrow = Math.abs(ox) >= Math.abs(oy) ? (ox >= 0 ? '→ ' : '← ') : (oy >= 0 ? '↓ ' : '↑ ');
         T.dragLabel = { x: (ent.x1 + ent.x2) / 2, y: (ent.y1 + ent.y2) / 2, text: arrow + FP.draw.fm(Math.hypot(ox, oy)) + ' m' };
+      } else if (d.sel.k === 'fence') {
+        const ox = G.snap(o.x1 + dx, g) - o.x1, oy = G.snap(o.y1 + dy, g) - o.y1;
+        ent.x1 = G.round(o.x1 + ox); ent.y1 = G.round(o.y1 + oy); ent.x2 = G.round(o.x2 + ox); ent.y2 = G.round(o.y2 + oy);
+        applyLinks(d.links, ox, oy);
+      } else if (d.sel.k === 'gate') {
+        const fe = M.find(p, 'fence', ent.fence);
+        if (fe) {
+          const v = M.wallVec(fe), pr = G.project(w, v.a, v.b);
+          ent.pos = G.round(Math.max(ent.w / 2, Math.min(v.L - ent.w / 2, G.snap(pr.t * v.L, mods.alt ? 0 : Math.min(0.05, S().snap || 0.01)))));
+        }
       } else if (d.sel.k === 'opening') {
         const wl = M.find(p, 'wall', ent.wall);
         if (wl) {
@@ -447,6 +715,13 @@ window.FP = window.FP || {};
         applyLinks(d.links, q.x - from.x, q.y - from.y);
         for (const op of p.openings) if (op.wall === ent.id) M.clampOpening(p, op);
         T.dragLabel = { x: (ent.x1 + ent.x2) / 2, y: (ent.y1 + ent.y2) / 2, text: FP.draw.fm(Math.hypot(ent.x2 - ent.x1, ent.y2 - ent.y1)) + ' m long' };
+      } else if (d.sel.k === 'fence') {
+        const fixed = d.h === '1' ? { x: o.x2, y: o.y2 } : { x: o.x1, y: o.y1 };
+        const q = orthoTarget(fixed, w, { excludeFence: ent.id });
+        const from = d.h === '1' ? { x: o.x1, y: o.y1 } : { x: o.x2, y: o.y2 };
+        if (d.h === '1') { ent.x1 = G.round(q.x); ent.y1 = G.round(q.y); } else { ent.x2 = G.round(q.x); ent.y2 = G.round(q.y); }
+        applyLinks(d.links, q.x - from.x, q.y - from.y);
+        T.dragLabel = { x: (ent.x1 + ent.x2) / 2, y: (ent.y1 + ent.y2) / 2, text: FP.draw.fm(Math.hypot(ent.x2 - ent.x1, ent.y2 - ent.y1)) + ' m long' };
       } else if (d.sel.k === 'room' || d.sel.k === 'area') {
         const i = +d.h;
         const q = snapPoint(w, { excludeShape: ent.id });
@@ -463,6 +738,7 @@ window.FP = window.FP || {};
         ent.r = G.round(Math.max(0.15, Math.hypot(w.x - ent.x, w.y - ent.y)), 2);
       }
     }
+    M.clampGates(p);
     A().refresh();
   }
 
@@ -478,6 +754,18 @@ window.FP = window.FP || {};
       for (const m of made) m.kind = st.opts.wallKind === 'auto' ? M.classifyWall(p, m) : st.opts.wallKind;
     });
     if (T.pts.length >= 2 && G.len(b, T.pts[0]) < 0.01) { T = {}; drawOverlay(); return; }
+    T.pts.push(b);
+  }
+
+  /* fence tool: click along the line of the fence; each stretch becomes a fence run */
+  function downFence(w) {
+    const st = S();
+    if (!T.pts || !T.pts.length) { T = { pts: [snapPoint(w, {})] }; T.target = T.pts[0]; drawOverlay(); return; }
+    const a = T.pts[T.pts.length - 1];
+    const b = orthoTarget(a, w);
+    if (G.len(a, b) < 0.1) return;
+    const kind = st.opts.fenceKind, fe = { id: M.uid('f'), kind, x1: G.round(a.x), y1: G.round(a.y), x2: G.round(b.x), y2: G.round(b.y), h: st.opts.fenceH[kind] };
+    A().mutate((p) => p.fences.push(fe));
     T.pts.push(b);
   }
 
@@ -527,7 +815,8 @@ window.FP = window.FP || {};
     const st = S();
     const d = C.items[st.opts.item];
     const step = mods.alt ? 0 : Math.min(0.05, S().snap || 0.01);
-    return { id: 'ghost', kind: st.opts.item, x: G.round(G.snap(w.x, step)), y: G.round(G.snap(w.y, step)), w: d.w, h: d.h, rot: st.opts.itemRot || 0 };
+    const sz = st.opts.itemSize[st.opts.item] || [d.w, d.h];
+    return { id: 'ghost', kind: st.opts.item, x: G.round(G.snap(w.x, step)), y: G.round(G.snap(w.y, step)), w: sz[0], h: sz[1], rot: st.opts.itemRot || 0 };
   }
 
   function onMove(e) {
@@ -541,7 +830,16 @@ window.FP = window.FP || {};
       return;
     }
     if (drag && (drag.type === 'move' || drag.type === 'handle')) return moveSelect(e, w);
+    if (drag && drag.type === 'moveMany') return moveMany(e, w);
+    if (drag && drag.type === 'marquee') {
+      if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) return;
+      drag.moved = true;
+      T.box = { a: drag.a, b: w };
+      drawOverlay();
+      return;
+    }
     if (drag && drag.type === 'rect') { T.b = snapPoint(w); drawOverlay(); return; }
+    if (drag && drag.type === 'zone') { T.b = snapPoint(w); drawOverlay(); return; }
     if (drag && drag.type === 'measure') { T.b = mods.shift ? snapPoint(w) : orthoTarget(T.a, w); drawOverlay(); return; }
 
     T.snapDot = null;
@@ -556,14 +854,21 @@ window.FP = window.FP || {};
         if (T.pts && T.pts.length) T.target = orthoTarget(T.pts[T.pts.length - 1], w);
         else snapPoint(w);
         break;
+      case 'fence':
+        if (T.pts && T.pts.length) T.target = orthoTarget(T.pts[T.pts.length - 1], w);
+        else snapPoint(w);
+        break;
       case 'room': case 'area':
         if (T.poly && T.poly.length) T.target = orthoTarget(T.poly[T.poly.length - 1], w);
         else snapPoint(w);
         break;
       case 'door': case 'window': T.op = openingGhost(w); break;
+      case 'gate': T.gate = gateGhost(w); break;
       case 'item': T.ghost = itemGhost(w); break;
       case 'plant': T.ghost = { id: 'ghost', kind: st.opts.plant, x: w.x, y: w.y, r: C.plants[st.opts.plant].r }; break;
       case 'measure': if (!T.a) snapPoint(w); break;
+      case 'laser': T.laser = mods.alt ? null : laserAt(w); break;
+      case 'zone': if (!T.a) snapPoint(w); break;
     }
     drawOverlay();
   }
@@ -574,8 +879,24 @@ window.FP = window.FP || {};
     drag = null;
     stage.classList.remove('dragging');
     if (!d) return;
-    T.dragLabel = null;
-    if (d.type === 'move' || d.type === 'handle') A().endChange(d.moved);
+    delete T.dragLabel;
+    if (d.type === 'move' || d.type === 'handle' || d.type === 'moveMany') A().endChange(d.moved);
+    if (d.type === 'marquee') {
+      const box = T.box;
+      delete T.box;
+      if (!d.moved || !box) { if (!d.add) A().select(null); else drawOverlay(); return; }
+      const hits = marqueeRefs(box), base = d.add ? A().curRefs() : [];
+      A().selectMany(base.concat(hits.filter((h) => !base.some((b) => b.id === h.id))));
+      drawOverlay();
+      return;
+    }
+    if (d.type === 'zone') {
+      const r = { kind: 'rect', x: G.round(Math.min(T.a.x, T.b.x)), y: G.round(Math.min(T.a.y, T.b.y)), w: G.round(Math.abs(T.b.x - T.a.x)), h: G.round(Math.abs(T.b.y - T.a.y)) };
+      T = {};
+      if (r.w >= 0.05 && r.h >= 0.05) marks.push(r);
+      drawOverlay();
+      return;
+    }
     if (d.type === 'rect') {
       const x = Math.min(T.a.x, T.b.x), y = Math.min(T.a.y, T.b.y), w = Math.abs(T.b.x - T.a.x), h = Math.abs(T.b.y - T.a.y);
       T = {};
@@ -586,7 +907,7 @@ window.FP = window.FP || {};
 
   function onDblClick(e) {
     const st = S();
-    if (st.tool === 'wall') { T = {}; drawOverlay(); return; }
+    if (st.tool === 'wall' || st.tool === 'fence') { T = {}; drawOverlay(); return; }
     if ((st.tool === 'room' || st.tool === 'area') && T.poly) return finishPoly();
     if (st.tool === 'select') {
       const hit = pick(e);
@@ -608,15 +929,16 @@ window.FP = window.FP || {};
 
   /* ---------- keyboard hooks (called by app) ---------- */
   function cancel() {
+    if (drag && drag.type === 'marquee') { drag = null; delete T.box; drawOverlay(); return true; }
     if (drag) return;
     const st = S();
-    if (Object.keys(T).length && !T.ghost && !T.op) { T = {}; drawOverlay(); return true; }
+    if (st.tool !== 'select' && Object.keys(T).length && !T.ghost && !T.op && !T.laser) { T = {}; drawOverlay(); return true; }
     if (st.tool !== 'select') { A().setTool('select'); return true; }
     return false;
   }
   function enter() {
     const st = S();
-    if (st.tool === 'wall' && T.pts) { T = {}; drawOverlay(); return true; }
+    if ((st.tool === 'wall' || st.tool === 'fence') && T.pts) { T = {}; drawOverlay(); return true; }
     if ((st.tool === 'room' || st.tool === 'area') && T.poly) { finishPoly(); return true; }
     return false;
   }
@@ -648,9 +970,9 @@ window.FP = window.FP || {};
     svg.addEventListener('dblclick', onDblClick);
     svg.addEventListener('wheel', onWheel, { passive: false });
     svg.addEventListener('contextmenu', (e) => e.preventDefault());
-    svg.addEventListener('pointerleave', () => { if (!drag) { hover = null; T.ghost = null; T.op = null; drawOverlay(); } });
+    svg.addEventListener('pointerleave', () => { if (!drag) { hover = null; T.ghost = null; T.op = null; T.laser = null; drawOverlay(); } });
     new ResizeObserver(() => applyView()).observe(stage);
   }
 
-  FP.editor = { init, redraw, drawOverlay, applyView, zoomAt, zoomTo, fit, cancel, enter, setModifier, rotateGhost, resetTool, BASE_SCALE, view: V };
+  FP.editor = { selectAll, clearMarks, init, redraw, drawOverlay, applyView, zoomAt, zoomTo, fit, cancel, enter, setModifier, rotateGhost, resetTool, BASE_SCALE, view: V };
 })();

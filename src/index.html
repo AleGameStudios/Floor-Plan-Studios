@@ -27,6 +27,8 @@
       <span class="divider"></span>
       <button id="btnTheme" class="icon-btn" title="Theme"></button>
       <button id="btnExport" class="ghost-btn" title="Export render as PNG (⌘E)"><span class="i"></span>Export</button>
+      <button id="btnImport" class="ghost-btn" title="Bring a house from another of your designs into this plot"><span class="i"></span>Import house</button>
+      <button id="btnChat" class="ghost-btn" title="Chat with Claude about your design; it can make changes for you"><span class="i"></span>Chat</button>
       <button id="btnClaude" class="accent-btn" title="Ask Claude to change, furnish or landscape the design"><span class="i"></span>Ask Claude</button>
     </div>
   </header>
@@ -56,6 +58,8 @@
       </div>
     </main>
 
+    <aside class="chat" id="chat" hidden aria-label="Chat with Claude"></aside>
+
     <aside class="side">
       <div class="tabs" role="tablist">
         <button class="tab active" data-tab="inspector">Inspector</button>
@@ -84,6 +88,7 @@
   <script src="view3d.js"></script>
   <script src="claude.js"></script>
   <script src="panels.js"></script>
+  <script src="chat.js"></script>
   <script src="home.js"></script>
   <script src="app.js"></script>
 </body>

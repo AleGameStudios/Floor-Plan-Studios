@@ -13,21 +13,23 @@ window.FP = window.FP || {};
   const state = {
     project: M.newProject('My house'),
     designId: null, placeholder: true, filePath: null, dirty: false,
-    sel: null, tool: 'select', mode: 'plan', dims: true,
+    sel: null, multi: [], tool: 'select', mode: 'plan', dims: true,
     theme: store.get('fp.theme') || 'system', resolvedTheme: 'light',
     wheel: store.get('fp.wheel') || 'zoom',
     // snap step in metres for drawing and moving (0 = off); an app preference, not part of a design
     snap: (() => { const v = parseFloat(store.get('fp.snap')); return v >= 0 && v <= 1 ? v : 0.05; })(),
     layers: { house: { visible: true, locked: false }, furniture: { visible: true, locked: false }, landscape: { visible: true, locked: false } },
     opts: {
+      itemSize: {}, // size to place a pool, field or other item at, per kind: [width, depth]
       wallT: 0.15, wallKind: 'auto', shape: 'rect', roomKind: 'bedroom', roomUse: 'indoor', roomWalls: true,
-      material: 'concrete', plant: 'tree', item: 'sofa', itemRot: 0, doorType: 'door',
+      material: 'concrete', plant: 'tree', fenceKind: 'large', fenceH: { large: 1.8, picket: 0.9 }, gateKind: 'garden', gateW: Object.fromEntries(Object.entries(FP.catalog.gates).map(([k, v]) => [k, v.w])), gateH: Object.fromEntries(Object.entries(FP.catalog.gates).map(([k, v]) => [k, v.h])), laserAll: false, item: 'sofa', itemRot: 0, doorType: 'door',
       openW: { door: 0.9, sliding: 1.8, window: 1.2, opening: 1.5 }
     },
     preview: null, previewShow: 'suggestion', claudeOpts: null
   };
   const undo = [], redo = [];
   let pending = null, raf = 0, panelsDirty = false, saveTimer = 0, toastTimer = 0;
+  let editSeq = 0; // bumps on every history change; the chat uses it to know whether its last edit is still the newest
 
   const shownProject = () => (state.preview && state.previewShow === 'suggestion' ? state.preview.project : state.project);
 
@@ -55,6 +57,7 @@ window.FP = window.FP || {};
     $('viewRender').classList.toggle('active', state.mode === 'render');
     $('viewThree').classList.toggle('active', state.mode === '3d');
     $('btnClaude').disabled = !!state.preview;
+    $('btnImport').disabled = !!state.preview;
     const title = p.name + (state.dirty ? ' • ' : '') + ' — Floorplan Studio';
     document.title = title;
     if (api) api.setTitle(title);
@@ -62,6 +65,7 @@ window.FP = window.FP || {};
 
   /* ---------- edits & history ---------- */
   function pushUndo(snap) {
+    editSeq++;
     undo.push(snap);
     if (undo.length > 200) undo.shift();
     redo.length = 0;
@@ -143,6 +147,7 @@ window.FP = window.FP || {};
     if (state.preview) { toast('Apply or discard the suggestion first.'); return; }
     const snap = JSON.stringify(state.project);
     fn(state.project);
+    M.pruneGroups(state.project);
     pushUndo(snap);
     markDirty();
     validateSel();
@@ -163,28 +168,81 @@ window.FP = window.FP || {};
   function doUndo() {
     if (state.preview) return;
     if (!undo.length) return toast('Nothing to undo');
+    editSeq++;
     redo.push(JSON.stringify(state.project));
     restore(undo.pop());
   }
   function doRedo() {
     if (state.preview || !redo.length) return;
+    editSeq++;
     undo.push(JSON.stringify(state.project));
     restore(redo.pop());
   }
   function validateSel() {
     if (state.sel && !M.find(state.project, state.sel.k, state.sel.id)) state.sel = null;
+    if (state.multi.length) {
+      state.multi = M.liveRefs(state.project, state.multi);
+      if (state.multi.length < 2) { state.sel = state.multi[0] || null; state.multi = []; }
+    }
+  }
+
+  // Several things selected at once (a box, Shift-click, a group). One or none falls back to a normal selection.
+  function selectMany(refs) {
+    refs = M.liveRefs(state.project, refs);
+    if (refs.length < 2) return select(refs[0] || null);
+    state.sel = null;
+    state.multi = refs;
+    FP.panels.showTab('inspector');
+    FP.panels.update(true);
+    FP.editor.drawOverlay();
+    if (state.mode === '3d') FP.view3d.syncSelection();
+  }
+  const curRefs = () => (state.multi.length ? state.multi : state.sel ? [state.sel] : []);
+  const isGroupSel = () => {
+    const g = state.multi.length ? M.groupOf(state.project, state.multi[0]) : null;
+    return g && M.sameRefs(g.members, state.multi) ? g : null;
+  };
+  function groupSelection() {
+    const refs = state.multi.slice();
+    if (state.preview) return;
+    if (refs.length < 2) return toast('Select two or more things first, then group them.');
+    mutate((p) => {
+      const keys = new Set(refs.map(M.keyOf));
+      for (const g of p.groups) g.members = g.members.filter((m) => !keys.has(M.keyOf(m)));
+      p.groups.push({ id: M.uid('grp'), name: 'Group ' + (p.groups.length + 1), members: refs.map((r) => ({ k: r.k, id: r.id })) });
+    });
+    selectMany(refs);
+    toast('Grouped. Click any part to select and move them all together.');
+  }
+  function ungroupSelection() {
+    const g = isGroupSel();
+    if (state.preview) return;
+    if (!g) return toast('Select a group first.');
+    const refs = state.multi.slice();
+    mutate((p) => { p.groups = p.groups.filter((x) => x.id !== g.id); });
+    selectMany(refs);
+    toast('Ungrouped.');
   }
 
   function select(sel) {
     state.sel = sel;
+    state.multi = [];
     if (sel) FP.panels.showTab('inspector');
     FP.panels.update(true);
     FP.editor.drawOverlay();
     if (state.mode === '3d') FP.view3d.syncSelection();
   }
   const TOOLS_3D = ['select', 'hand', 'item', 'plant'];
+  const SITE_GROUP = 'Pools, quinchos & sports';
   function setTool(t) {
     if (state.preview) return;
+    // "Pools & courts" is the furniture tool narrowed to its own library
+    if (t === 'site' || t === 'item') {
+      const site = t === 'site', cur = FP.catalog.items[state.opts.item];
+      state.site = site;
+      if (!cur || (cur.group === SITE_GROUP) !== site) state.opts.item = site ? 'pool' : 'sofa';
+      t = 'item';
+    }
     if (state.mode === '3d' && !TOOLS_3D.includes(t)) { setMode('plan'); toast('Switched to Plan to draw.'); }
     state.tool = t;
     FP.editor.resetTool();
@@ -220,6 +278,12 @@ window.FP = window.FP || {};
   }
 
   function deleteSelection() {
+    if (state.multi.length) {
+      const refs = state.multi.slice();
+      mutate((p) => refs.forEach((r) => M.remove(p, r.k, r.id)));
+      select(null);
+      return;
+    }
     const s = state.sel;
     if (!s) return;
     mutate((p) => M.remove(p, s.k, s.id));
@@ -227,6 +291,15 @@ window.FP = window.FP || {};
   }
 
   function duplicate() {
+    if (state.multi.length && !state.preview) {
+      const g = isGroupSel();
+      let made = [];
+      mutate((p) => {
+        made = M.cloneRefs(p, state.multi, 0.5);
+        if (g && made.length > 1) p.groups.push({ id: M.uid('grp'), name: g.name + ' copy', members: made.slice() });
+      });
+      return selectMany(made);
+    }
     const s = state.sel;
     if (!s || state.preview) return;
     const src = M.find(state.project, s.k, s.id);
@@ -235,22 +308,36 @@ window.FP = window.FP || {};
     c.id = M.uid(s.k[0]);
     const d = 0.5;
     if (c.pts) c.pts = c.pts.map((q) => ({ x: q.x + d, y: q.y + d }));
-    if (s.k === 'wall') { c.x1 += d; c.y1 += d; c.x2 += d; c.y2 += d; }
+    if (s.k === 'wall' || s.k === 'fence') { c.x1 += d; c.y1 += d; c.x2 += d; c.y2 += d; }
     if (s.k === 'item' || s.k === 'plant') { c.x += d; c.y += d; }
-    if (s.k === 'opening') c.pos += c.w + 0.3;
+    if (s.k === 'opening' || s.k === 'gate') c.pos += c.w + 0.3;
     if (s.k === 'room') c.name = c.name + ' copy';
-    mutate((p) => { M.list(p, s.k).push(c); if (s.k === 'opening') M.clampOpening(p, c); });
+    mutate((p) => { M.list(p, s.k).push(c); if (s.k === 'opening') M.clampOpening(p, c); if (s.k === 'gate') M.clampGate(p, c); });
     select({ k: s.k, id: c.id });
   }
 
   function rotateSelection(deg) {
     if (state.tool === 'item') return FP.editor.rotateGhost(deg);
+    if (state.multi.length) {
+      const refs = state.multi.slice();
+      mutate((p) => {
+        const b = M.selBox(p, refs.filter((r) => M.MOVABLE.includes(r.k)));
+        if (!b) return;
+        M.rotateRefs(p, refs, { x: G.snap((b.x0 + b.x1) / 2, 0.05), y: G.snap((b.y0 + b.y1) / 2, 0.05) }, deg > 0 ? 1 : -1);
+      });
+      return;
+    }
     const s = state.sel;
     if (!s || s.k !== 'item') return;
     mutate((p) => { const it = M.find(p, 'item', s.id); it.rot = (((it.rot || 0) + deg) % 360 + 360) % 360; });
   }
 
   function nudge(dx, dy) {
+    if (state.multi.length) {
+      const refs = state.multi.slice();
+      mutate((p) => M.translateRefs(p, refs, dx, dy));
+      return;
+    }
     const s = state.sel;
     if (!s) return;
     mutate((p) => {
@@ -258,6 +345,8 @@ window.FP = window.FP || {};
       if (!e) return;
       if (e.pts) e.pts = e.pts.map((q) => ({ x: G.round(q.x + dx), y: G.round(q.y + dy) }));
       else if (s.k === 'opening') { const v = M.wallVec(M.find(p, 'wall', e.wall)); e.pos += dx * v.ux + dy * v.uy; M.clampOpening(p, e); }
+      else if (s.k === 'gate') { const fe = M.find(p, 'fence', e.fence); if (fe) { const v = M.wallVec(fe); e.pos += dx * v.ux + dy * v.uy; M.clampGate(p, e); } }
+      else if (s.k === 'fence') { e.x1 = G.round(e.x1 + dx); e.y1 = G.round(e.y1 + dy); e.x2 = G.round(e.x2 + dx); e.y2 = G.round(e.y2 + dy); }
       else if (s.k === 'wall') {
         const vertical = Math.abs(e.x1 - e.x2) < 1e-6, horizontal = Math.abs(e.y1 - e.y2) < 1e-6;
         if (vertical || horizontal) {
@@ -295,6 +384,22 @@ window.FP = window.FP || {};
     refresh();
     toast('Suggestion applied. ⌘Z undoes it.');
   }
+  // Apply a validated project straight away (used by the chat). One undo step. Returns the diff, or null if blocked.
+  function applyNow(next) {
+    if (state.preview) { toast('Apply or discard the current suggestion first.'); return null; }
+    next.name = state.project.name;
+    const diff = FP.claude.diff(state.project, next);
+    if (!diff.total) return diff;
+    const snap = JSON.stringify(state.project);
+    state.project = M.normalize(next);
+    state.sel = null;
+    pushUndo(snap);
+    markDirty();
+    FP.panels.updateTool();
+    refresh();
+    if (diff.lot) requestAnimationFrame(() => FP.editor.fit());
+    return diff;
+  }
   function discardPreview() {
     if (!state.preview) return;
     state.preview = null;
@@ -318,6 +423,8 @@ window.FP = window.FP || {};
     if (api) api.setDirty(false);
     FP.editor.resetTool();
     FP.panels.updateTool();
+    if (FP.chat) FP.chat.onDesignChange();
+    FP.editor.clearMarks();
     refresh();
     requestAnimationFrame(() => { FP.editor.fit(); if (state.mode === '3d') FP.view3d.fit(); });
     if (opts.persist) { state.dirty = true; saveToLibrary(); }
@@ -466,6 +573,9 @@ window.FP = window.FP || {};
       case 'undo': return typing() ? document.execCommand('undo') : modalOpen ? null : doUndo();
       case 'redo': return typing() ? document.execCommand('redo') : modalOpen ? null : doRedo();
       case 'duplicate': return typing() || modalOpen ? null : duplicate();
+      case 'selectAll': return typing() ? document.execCommand('selectAll') : modalOpen ? null : FP.editor.selectAll();
+      case 'group': return typing() || modalOpen ? null : groupSelection();
+      case 'ungroup': return typing() || modalOpen ? null : ungroupSelection();
       case 'viewPlan': return setMode('plan');
       case 'viewRender': return setMode('render');
       case 'view3d': return setMode('3d');
@@ -473,7 +583,7 @@ window.FP = window.FP || {};
     }
   }
 
-  const TOOL_KEYS = { v: 'select', h: 'hand', w: 'wall', r: 'room', d: 'door', n: 'window', f: 'item', a: 'area', t: 'plant', m: 'measure' };
+  const TOOL_KEYS = { v: 'select', h: 'hand', w: 'wall', r: 'room', d: 'door', n: 'window', f: 'item', a: 'area', t: 'plant', g: 'fence', j: 'gate', p: 'site', l: 'laser', z: 'zone', m: 'measure' };
   function onKey(e) {
     if (e.key === 'Shift') FP.editor.setModifier('shift', true);
     if (e.key === 'Alt') FP.editor.setModifier('alt', true);
@@ -485,7 +595,7 @@ window.FP = window.FP || {};
     if (meta) {
       if (api) return; // the native menu owns accelerators
       const k = e.key.toLowerCase();
-      const map = { z: e.shiftKey ? 'redo' : 'undo', s: e.shiftKey ? 'saveAs' : 'save', o: 'open', d: 'duplicate', e: 'exportPng', 1: 'viewPlan', 2: 'viewRender', 3: 'view3d', 0: 'zoomFit' };
+      const map = { z: e.shiftKey ? 'redo' : 'undo', s: e.shiftKey ? 'saveAs' : 'save', o: 'open', d: 'duplicate', a: 'selectAll', g: e.shiftKey ? 'ungroup' : 'group', e: 'exportPng', 1: 'viewPlan', 2: 'viewRender', 3: 'view3d', 0: 'zoomFit' };
       if (map[k]) { e.preventDefault(); command(map[k]); }
       return;
     }
@@ -530,6 +640,10 @@ window.FP = window.FP || {};
     $('btnTheme').onclick = cycleTheme;
     $('btnExport').onclick = exportPng;
     $('btnClaude').onclick = () => FP.panels.openAsk();
+    document.querySelector('#btnImport .i').innerHTML = I.house;
+    $('btnImport').onclick = () => FP.panels.openImport();
+    document.querySelector('#btnChat .i').innerHTML = I.chat;
+    $('btnChat').onclick = () => FP.chat.toggle();
     $('viewPlan').onclick = () => setMode('plan');
     $('viewRender').onclick = () => setMode('render');
     $('viewThree').onclick = () => setMode('3d');
@@ -586,8 +700,9 @@ window.FP = window.FP || {};
 
   FP.app = {
     state, shownProject, refresh, mutate, beginChange, endChange, select, setTool, setMode, setWheel, setSnap,
-    duplicate, rotateSelection, toast, propose, applyPreview, discardPreview, openFile, loadSample, newBlank,
-    listDesigns: () => lib.list(), openDesign, deleteDesign, goHome, walkThrough, flushSave,
+    selectMany, curRefs, isGroupSel, groupSelection, ungroupSelection,
+    duplicate, rotateSelection, toast, propose, applyPreview, discardPreview, applyNow, undo: doUndo, editSeq: () => editSeq, openFile, loadSample, newBlank,
+    listDesigns: () => lib.list(), loadDesignProject: async (id) => { const d = await lib.load(id); return d && d.project ? M.normalize(JSON.parse(JSON.stringify(d.project))) : null; }, openDesign, deleteDesign, goHome, walkThrough, flushSave,
     hasOpenDesign: () => !state.placeholder
   };
 

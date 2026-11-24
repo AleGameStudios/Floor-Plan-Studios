@@ -139,16 +139,48 @@ FP.catalog = {
   },
 
   // Ground surfaces for the plot. Drawn in list order, so later ones sit on top.
+  // Ground surfaces. group sorts them in the library. A material with a tex description is drawn from it, in the
+  // plan render and in 3D alike: speckle = scattered dots, units = rows of slabs, bricks or setts with joints,
+  // cobble = rounded stones. size is the repeat in metres; every length is in metres.
   materials: {
-    lawn: { label: 'Lawn', flat: '#b9d79a' },
-    concrete: { label: 'Concrete', flat: '#d4d2cc' },
-    pavers: { label: 'Pavers', flat: '#d9c7ad' },
-    gravel: { label: 'Gravel', flat: '#ddd5c4' },
-    deck: { label: 'Timber deck', flat: '#cfa77b' },
-    mulch: { label: 'Garden bed', flat: '#a98563' },
-    hedge: { label: 'Hedge', flat: '#6f9a55' },
-    water: { label: 'Pool / water', flat: '#9fd6ea' },
-    sand: { label: 'Sand', flat: '#ece0bd' }
+    lawn: { label: 'Lawn', flat: '#b9d79a', group: 'Ground & garden' },
+    deck: { label: 'Timber deck', flat: '#cfa77b', group: 'Ground & garden' },
+    mulch: { label: 'Garden bed', flat: '#a98563', group: 'Ground & garden' },
+    hedge: { label: 'Hedge', flat: '#6f9a55', group: 'Ground & garden' },
+    water: { label: 'Pool / water', flat: '#9fd6ea', group: 'Ground & garden' },
+    sand: { label: 'Sand', flat: '#ece0bd', group: 'Ground & garden' },
+
+    concrete: { label: 'Concrete', flat: '#d4d2cc', group: 'Paths & roads' },
+    pavers: { label: 'Pavers', flat: '#d9c7ad', group: 'Paths & roads' },
+    gravel: { label: 'Gravel', flat: '#ddd5c4', group: 'Paths & roads' },
+    asphalt: { label: 'Asphalt road', flat: '#5a5d62', group: 'Paths & roads',
+      tex: { t: 'speckle', size: 2, base: '#4b4e53', colors: ['#40434a', '#585b61', '#3a3d42', '#62656b'], n: 420, rmin: 0.012, rmax: 0.03 } },
+    crushed: { label: 'Crushed-stone road', flat: '#aaa59b', group: 'Paths & roads',
+      tex: { t: 'speckle', size: 1.5, base: '#a39e94', colors: ['#8f8a80', '#b8b3a8', '#7f7a71', '#c6c1b6'], n: 360, rmin: 0.02, rmax: 0.055 } },
+    granite: { label: 'Decomposed granite', flat: '#cdae80', group: 'Paths & roads',
+      tex: { t: 'speckle', size: 1, base: '#c9a574', colors: ['#bb9564', '#d8b887', '#b08a5b', '#e0c597'], n: 300, rmin: 0.01, rmax: 0.03 } },
+    aggregate: { label: 'Exposed aggregate', flat: '#cbc6ba', group: 'Paths & roads',
+      tex: { t: 'speckle', size: 1, base: '#c9c4b8', colors: ['#a8a398', '#e3dfd4', '#8f8a80', '#d3b99a', '#b6ada0'], n: 420, rmin: 0.01, rmax: 0.026 } },
+    dirt: { label: 'Dirt track', flat: '#a07c55', group: 'Paths & roads',
+      tex: { t: 'speckle', size: 1.5, base: '#9a7650', colors: ['#8a6742', '#a9855d', '#7a5a38', '#b4916a'], n: 340, rmin: 0.015, rmax: 0.045 } },
+    pebbles: { label: 'River pebbles', flat: '#cdc8bd', group: 'Paths & roads',
+      tex: { t: 'cobble', size: 1.2, cells: 9, base: '#8d877b', tones: ['#e8e4dc', '#cfc9bd', '#b9b2a5', '#f2efe8', '#a49d90'], fill: 0.5, jitter: 0.28 } },
+    cobble: { label: 'Cobblestone', flat: '#9b9890', group: 'Paths & roads',
+      tex: { t: 'cobble', size: 2, cells: 8, base: '#6f6d6b', tones: ['#9b9aa0', '#8a8a8f', '#a8a39a', '#7f7d80', '#b3aea3'], fill: 0.47, jitter: 0.12 } },
+    setts: { label: 'Granite setts', flat: '#8d9094', group: 'Paths & roads',
+      tex: { t: 'units', size: 1.2, rows: 10, perRow: 10, var: 0.12, rowVar: 0, stagger: true, base: '#5c5e62', seamW: 0.014, tones: ['#8c8e93', '#7d8085', '#999b9f', '#6f7277'] } },
+    brick: { label: 'Brick paving', flat: '#a95c44', group: 'Paths & roads',
+      tex: { t: 'units', size: 1.2, rows: 10, perRow: 5, var: 0, rowVar: 0, stagger: true, base: '#c9bfb2', seamW: 0.014, tones: ['#a8573f', '#b5644a', '#9a4e38', '#c07456', '#8f4934'] } },
+    terracotta: { label: 'Terracotta tiles', flat: '#c98a62', group: 'Paths & roads',
+      tex: { t: 'units', size: 1.2, rows: 3, perRow: 3, var: 0, rowVar: 0, stagger: false, base: '#a8643f', seamW: 0.02, tones: ['#c9855a', '#d19468', '#bf7a50', '#d89d74'] } },
+    sandstone: { label: 'Sandstone paving', flat: '#d6b88e', group: 'Paths & roads',
+      tex: { t: 'units', size: 2.4, rows: 6, perRow: 3, var: 0.28, rowVar: 0.12, stagger: true, base: '#b8956a', seamW: 0.025, tones: ['#d9b98b', '#e2c79c', '#cfa978', '#e8d0a8', '#c99f6e'] } },
+    flagstone: { label: 'Flagstone path', flat: '#9a9c9a', group: 'Paths & roads',
+      tex: { t: 'units', size: 3, rows: 5, perRow: 3.4, var: 0.5, rowVar: 0.35, stagger: 'random', base: '#6e716f', seamW: 0.04, tones: ['#8f9399', '#a29f98', '#7f858a', '#b0aca3', '#989b94'] } },
+    slabs: { label: 'Concrete slabs', flat: '#cdcbc6', group: 'Paths & roads',
+      tex: { t: 'units', size: 1.8, rows: 2, perRow: 2, var: 0, rowVar: 0, stagger: false, base: '#a9a7a1', seamW: 0.025, tones: ['#cfcdc8', '#c8c6c0', '#d4d2cd'] } },
+    grasspave: { label: 'Grass pavers', flat: '#a9b88f', group: 'Paths & roads',
+      tex: { t: 'units', size: 1.2, rows: 3, perRow: 3, var: 0, rowVar: 0, stagger: false, base: '#7fae58', seamW: 0.15, tones: ['#b9b6ae', '#c2bfb7'] } }
   },
 
   plants: {
@@ -158,6 +190,27 @@ FP.catalog = {
     conifer: { label: 'Conifer', r: 1.1 },
     shrub: { label: 'Shrub', r: 0.6 },
     flowers: { label: 'Flowers', r: 0.4 }
+  },
+
+  // Fence styles. h is the default height in metres, color the default finish (a fence can override it).
+  fences: {
+    large: { label: 'Large fence', h: 1.8, color: '#8a6a4a', hMin: 1.2, hMax: 3.6, hint: 'Solid privacy / boundary fence' },
+    picket: { label: 'White picket fence', h: 0.9, color: '#ffffff', hMin: 0.4, hMax: 1.5, hint: 'Low garden fence with pointed pickets' }
+  },
+
+  // Gates sit on a fence run and cut it open. w and h are the defaults in metres, style picks how the leaf is built,
+  // leaves is 1 or 2 swing leaves, slide makes a sliding panel.
+  gates: {
+    picket: { label: 'Picket gate', w: 1.0, h: 0.95, color: '#ffffff', style: 'picket', leaves: 1, hint: 'Low white gate with pointed pickets' },
+    garden: { label: 'Timber garden gate', w: 1.0, h: 1.3, color: '#8a6a4a', style: 'boards', leaves: 1, hint: 'Solid board gate with a brace' },
+    arched: { label: 'Arched cottage gate', w: 1.1, h: 1.45, color: '#5f7d68', style: 'arched', leaves: 1, hint: 'Painted timber gate with a curved top' },
+    double: { label: 'Double timber gate', w: 3.0, h: 1.8, color: '#8a6a4a', style: 'boards', leaves: 2, hint: 'Two swing leaves for a car or a wide path' },
+    farm: { label: 'Farm gate (5-bar)', w: 3.6, h: 1.3, color: '#a8adb2', style: 'rails', leaves: 1, hint: 'Galvanised five-bar field gate' },
+    sliding: { label: 'Sliding gate', w: 4.0, h: 1.8, color: '#3d4146', style: 'slats', leaves: 1, slide: true, hint: 'Slat panel that slides along the fence' },
+    iron: { label: 'Wrought-iron gate', w: 1.1, h: 1.5, color: '#26282b', style: 'bars', leaves: 1, hint: 'Black bars with spear tops' },
+    driveway: { label: 'Iron driveway gates', w: 3.6, h: 1.6, color: '#26282b', style: 'bars', leaves: 2, hint: 'Pair of tall iron gates' },
+    slat: { label: 'Modern slat gate', w: 1.0, h: 1.8, color: '#3b3f44', style: 'slats', leaves: 1, hint: 'Horizontal slats in a steel frame' },
+    mesh: { label: 'Wire-mesh gate', w: 1.2, h: 1.8, color: '#7a8086', style: 'mesh', leaves: 1, hint: 'Steel frame with welded wire mesh' }
   },
 
   items: {
@@ -195,7 +248,19 @@ FP.catalog = {
     'outdoor-sofa': { label: 'Outdoor sofa', w: 2.0, h: 0.85, group: 'Outdoor' },
     'bbq': { label: 'Barbecue', w: 1.2, h: 0.6, group: 'Outdoor' },
     'bench': { label: 'Bench', w: 1.5, h: 0.5, group: 'Outdoor' },
-    'planter': { label: 'Planter', w: 0.6, h: 0.6, group: 'Outdoor' }
+    'planter': { label: 'Planter', w: 0.6, h: 0.6, group: 'Outdoor' },
+
+    // Pools, quinchos and sports fields: sized freely with Width and Depth, and kept in the Landscape layer.
+    'pool': { label: 'Swimming pool', w: 4, h: 8, group: 'Pools, quinchos & sports', layer: 'landscape', big: true },
+    'pool-oval': { label: 'Oval pool', w: 4.5, h: 8, group: 'Pools, quinchos & sports', layer: 'landscape', big: true },
+    'pool-kidney': { label: 'Kidney pool', w: 8, h: 4.5, group: 'Pools, quinchos & sports', layer: 'landscape', big: true },
+    'plunge': { label: 'Plunge pool', w: 2.5, h: 4, group: 'Pools, quinchos & sports', layer: 'landscape', big: true },
+    'spa': { label: 'Hot tub', w: 2.1, h: 2.1, group: 'Pools, quinchos & sports', layer: 'landscape', big: true },
+    'quincho': { label: 'Quincho (BBQ pavilion)', w: 6, h: 4.5, group: 'Pools, quinchos & sports', layer: 'landscape', big: true },
+    'parrilla': { label: 'Parrilla (built-in grill)', w: 1.6, h: 0.8, group: 'Pools, quinchos & sports', layer: 'landscape', big: true },
+    'soccer': { label: 'Soccer field', w: 40, h: 22, group: 'Pools, quinchos & sports', layer: 'landscape', big: true },
+    'basketball': { label: 'Basketball court', w: 28, h: 15, group: 'Pools, quinchos & sports', layer: 'landscape', big: true },
+    'basketball-half': { label: 'Half basketball court', w: 14, h: 15, group: 'Pools, quinchos & sports', layer: 'landscape', big: true }
   },
 
   // h = opening height, sill = height of its bottom edge above the floor

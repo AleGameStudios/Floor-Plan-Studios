@@ -22,6 +22,72 @@ window.FP = window.FP || {};
   }
   const pick = (r, arr) => arr[Math.floor(r() * arr.length)];
 
+  /* ---------- ground textures described in the catalog (paths, roads) ---------- */
+  // One repeating tile as plain shapes in metres: { size, base, shapes }, shapes being
+  // { k: 'r', x, y, w, h, c } rectangles or { k: 'e', x, y, rx, ry, c } ellipses. Used by the SVG patterns
+  // below and by the canvas textures in the 3D view, so a surface looks the same in both.
+  const tileCache = {};
+  function groundTile(key) {
+    if (tileCache[key]) return tileCache[key];
+    const d = (C.materials[key] || {}).tex;
+    if (!d) return null;
+    const r = rng('ground-' + key), S = d.size, shapes = [];
+    // keep a shape, plus copies where it crosses the tile edge, so the repeat has no seams
+    const emit = (sh) => {
+      const x0 = sh.k === 'r' ? sh.x : sh.x - sh.rx, x1 = sh.k === 'r' ? sh.x + sh.w : sh.x + sh.rx;
+      const y0 = sh.k === 'r' ? sh.y : sh.y - sh.ry, y1 = sh.k === 'r' ? sh.y + sh.h : sh.y + sh.ry;
+      for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) {
+        if (x1 + ox <= 0 || x0 + ox >= S || y1 + oy <= 0 || y0 + oy >= S) continue;
+        shapes.push(Object.assign({}, sh, { x: sh.x + ox, y: sh.y + oy }));
+      }
+    };
+    const weights = (n, v) => { const w = Array.from({ length: n }, () => 1 + (r() - 0.5) * 2 * v), t = w.reduce((a, b) => a + b, 0); return w.map((x) => (x / t) * S); };
+    if (d.t === 'speckle') {
+      for (let i = 0; i < d.n; i++) emit({ k: 'e', x: r() * S, y: r() * S, rx: d.rmin + r() * (d.rmax - d.rmin), ry: 0, c: pick(r, d.colors) });
+      for (const sh of shapes) sh.ry = sh.rx;
+    } else if (d.t === 'units') {
+      const hs = weights(d.rows, d.rowVar || 0), inset = d.seamW / 2;
+      let y = 0;
+      hs.forEach((h, i) => {
+        const n = Math.max(1, Math.round(d.perRow)), ws = weights(n, d.var || 0);
+        const shift = d.stagger === 'random' ? r() * S : d.stagger && i % 2 ? S / n / 2 : 0;
+        let x = shift;
+        for (const w of ws) {
+          emit({ k: 'r', x: x + inset, y: y + inset, w: Math.max(0.01, w - d.seamW), h: Math.max(0.01, h - d.seamW), c: pick(r, d.tones) });
+          x += w;
+        }
+        y += h;
+      });
+    } else if (d.t === 'cobble') {
+      const cell = S / d.cells;
+      for (let j = 0; j < d.cells; j++) for (let i = 0; i < d.cells; i++) {
+        const cx = (i + (j % 2 ? 1 : 0.5)) * cell + (r() - 0.5) * cell * d.jitter, cy = (j + 0.5) * cell + (r() - 0.5) * cell * d.jitter;
+        emit({ k: 'e', x: cx, y: cy, rx: cell * d.fill * (0.9 + r() * 0.2), ry: cell * d.fill * (0.8 + r() * 0.2), c: pick(r, d.tones) });
+      }
+    }
+    return (tileCache[key] = { size: S, base: d.base, shapes });
+  }
+  function groundPatterns() {
+    let s = '';
+    for (const key of Object.keys(C.materials)) {
+      const t = groundTile(key);
+      if (!t) continue;
+      s += '<pattern id="pat-g-' + key + '" width="' + t.size + '" height="' + t.size + '" patternUnits="userSpaceOnUse"><rect width="' + t.size + '" height="' + t.size + '" fill="' + t.base + '"/>';
+      for (const sh of t.shapes) {
+        s += sh.k === 'r'
+          ? '<rect x="' + f(sh.x) + '" y="' + f(sh.y) + '" width="' + f(sh.w) + '" height="' + f(sh.h) + '" fill="' + sh.c + '"/>'
+          : '<ellipse cx="' + f(sh.x) + '" cy="' + f(sh.y) + '" rx="' + f(sh.rx) + '" ry="' + f(sh.ry) + '" fill="' + sh.c + '"/>';
+      }
+      s += '</pattern>';
+    }
+    return s;
+  }
+  // Pattern id used to paint a ground material in the render and in the library.
+  function groundFillId(key) {
+    const old = { lawn: 'pat-grass', concrete: 'pat-concrete-j', pavers: 'pat-pavers', gravel: 'pat-gravel', deck: 'pat-deck', mulch: 'pat-mulch', hedge: 'pat-hedge', water: 'g-water', sand: 'pat-sand' };
+    return old[key] || ((C.materials[key] || {}).tex ? 'pat-g-' + key : null);
+  }
+
   /* ---------- shared defs: textures, gradients, shadows ---------- */
   function speckle(id, size, base, colors, n, rmin, rmax, seed) {
     const r = rng(seed || id);
@@ -95,6 +161,7 @@ window.FP = window.FP || {};
     if (defsCache) return defsCache;
     let s = '<defs>';
     s += grass();
+    s += groundPatterns();
     s += overlays();
     s += planks('pat-wood', 0.18, 8, 3, ['#d9b582', '#d0a974', '#ddbd8c', '#cca46c', '#d6b07c'], '#b38a59');
     s += planks('pat-deck', 0.14, 10, 3, ['#b68858', '#c09466', '#ab7d4e', '#bb8f60'], '#86603b');
@@ -251,6 +318,92 @@ window.FP = window.FP || {};
     return s + R(-tw / 2, -th / 2, tw, th, '#b48a5f', '#7a5a3b', 0.015, 0.03) + R(-tw / 2 + 0.05, -th / 2 + 0.05, tw - 0.1, th - 0.1, '#bd956a', null, 0, 0.02);
   }
 
+  /* ---------- pools, quinchos and sports fields: sized by the item's width and depth ---------- */
+  const COPING = '#ece7dc', COPING_EDGE = '#b9b1a1', WATER = 'url(#g-water)', WATER_EDGE = '#3b9cc4';
+  const poly = (pts, fill, stroke, sw) => '<polygon points="' + pts.map((q) => f(q[0]) + ',' + f(q[1])).join(' ') + '" fill="' + fill + '"' + (stroke ? ' stroke="' + stroke + '" stroke-width="' + (sw || 0.02) + '"' : '') + '/>';
+  // Outline of a bean-shaped pool, long axis along x, inset by d.
+  function kidneyPts(w, h, d) {
+    const a = Math.max(0.2, w / 2 - d), b = Math.max(0.2, h / 2 - d), k = -0.42 * b, out = [];
+    for (let i = 0; i < 56; i++) { const t = (i / 56) * Math.PI * 2, c = Math.cos(t); out.push([a * c, b * Math.sin(t) * 0.78 + k * c * c + 0.2 * b]); }
+    return out;
+  }
+  function poolRect(w, h, cope, steps, lanes) {
+    const c = Math.min(cope, w / 3, h / 3);
+    let s = R(-w / 2, -h / 2, w, h, COPING, COPING_EDGE, 0.02, 0.12);
+    s += R(-w / 2 + c, -h / 2 + c, w - 2 * c, h - 2 * c, WATER, WATER_EDGE, 0.025, 0.08);
+    if (steps) {
+      const sw = Math.min(w - 2 * c - 0.2, Math.max(1.2, w * 0.45)), sd = Math.min(h * 0.22, 1.1);
+      s += R(-sw / 2, -h / 2 + c, sw, sd, '#cdeef8', '#8fcfe4', 0.012);
+      for (let i = 1; i < 3; i++) s += Ln(-sw / 2, -h / 2 + c + (sd * i) / 3, sw / 2, -h / 2 + c + (sd * i) / 3, '#8fcfe4', 0.01);
+    }
+    if (lanes) for (let i = 1; i <= 2; i++) s += '<line x1="' + f(-w / 2 + c + 0.2 + ((w - 2 * c - 0.4) * i) / 3) + '" y1="' + f(-h / 2 + c + (steps ? h * 0.25 : 0.3)) + '" x2="' + f(-w / 2 + c + 0.2 + ((w - 2 * c - 0.4) * i) / 3) + '" y2="' + f(h / 2 - c - 0.3) + '" stroke="#2d7fa6" stroke-width=".03" stroke-dasharray=".25 .2" stroke-opacity=".55"/>';
+    return s;
+  }
+  // A sports pitch drawn long side along x; turned when it is deeper than it is wide.
+  const turned = (w, h, draw) => (h > w ? '<g transform="rotate(90)">' + draw(h, w) + '</g>' : draw(w, h));
+  function soccer(a, b) {
+    const ins = Math.max(0.2, Math.min(0.8, b * 0.04)), lw = Math.max(0.08, Math.min(0.14, b * 0.007)), W = '#ffffff';
+    let s = R(-a / 2, -b / 2, a, b, '#5e9d49', '#3f7a35', 0.04);
+    const n = Math.max(4, 2 * Math.round(a / 8));
+    for (let i = 0; i < n; i += 2) s += R(-a / 2 + (i * a) / n, -b / 2, a / n, b, '#559340');
+    s += R(-a / 2 + ins, -b / 2 + ins, a - 2 * ins, b - 2 * ins, 'none', W, lw);
+    s += Ln(0, -b / 2 + ins, 0, b / 2 - ins, W, lw) + Ci(0, 0, Math.min(b * 0.135, a * 0.09), 'none', W, lw) + Ci(0, 0, lw * 1.2, W);
+    const pd = a * 0.157, pw = b * 0.593, sd = a * 0.052, sw = b * 0.27, sp = a * 0.105, gw = Math.max(1.2, b * 0.108), gd = Math.max(0.35, Math.min(1.1, a * 0.02));
+    for (const e of [-1, 1]) {
+      const x = e * (a / 2 - ins), dir = -e;
+      s += R(e < 0 ? x : x - pd, -pw / 2, pd, pw, 'none', W, lw) + R(e < 0 ? x : x - sd, -sw / 2, sd, sw, 'none', W, lw);
+      s += Ci(x + dir * sp, 0, lw * 1.1, W);
+      s += R(e < 0 ? x : x - gd, -gw / 2, gd, gw, 'rgba(255,255,255,.35)', '#f4f4f4', 0.05);
+    }
+    return s;
+  }
+  function basketball(a, b, half) {
+    const sc = b / 15, ins = Math.min(1.2, b * 0.08), lw = Math.max(0.07, 0.05 * sc + 0.03), W = '#ffffff';
+    let s = R(-a / 2, -b / 2, a, b, '#3f7a63', '#2d5a49', 0.04) + R(-a / 2 + ins, -b / 2 + ins, a - 2 * ins, b - 2 * ins, '#d9a66b', W, lw);
+    if (!half) s += Ln(0, -b / 2 + ins, 0, b / 2 - ins, W, lw) + Ci(0, 0, 1.8 * sc, 'none', W, lw);
+    const end = (e) => {
+      const base = -a / 2 + ins, hoop = base + 1.575 * sc, key = 5.8 * sc, kw = 4.9 * sc, r3 = 6.75 * sc, dy = b / 2 - ins - 0.9 * sc;
+      let o = R(base, -kw / 2, key, kw, '#b5473a', W, lw) + Ci(base + key, 0, 1.8 * sc, 'none', W, lw);
+      if (dy < r3) { const dx = Math.sqrt(r3 * r3 - dy * dy); o += '<path d="M' + f(base) + ' ' + f(-dy) + ' L' + f(hoop + dx) + ' ' + f(-dy) + ' A' + f(r3) + ' ' + f(r3) + ' 0 0 1 ' + f(hoop + dx) + ' ' + f(dy) + ' L' + f(base) + ' ' + f(dy) + '" fill="none" stroke="' + W + '" stroke-width="' + f(lw) + '"/>'; }
+      o += Ln(base + 1.2 * sc, -0.9 * sc, base + 1.2 * sc, 0.9 * sc, '#2b2b2b', 0.07) + Ci(hoop, 0, 0.23, 'none', '#e0602a', 0.045);
+      return e < 0 ? o : '<g transform="scale(-1 1)">' + o + '</g>';
+    };
+    return s + end(-1) + (half ? '' : end(1));
+  }
+  const SITE = {
+    'pool': (w, h) => poolRect(w, h, 0.4, true, true),
+    'plunge': (w, h) => poolRect(w, h, 0.3, false, false) + R(-w / 2 + 0.3, -h / 2 + 0.3, 0.45, h - 0.6, '#cdeef8', '#8fcfe4', 0.01),
+    'pool-oval': (w, h) => El(0, 0, w / 2, h / 2, COPING, COPING_EDGE, 0.02) + El(0, 0, Math.max(0.2, w / 2 - 0.4), Math.max(0.2, h / 2 - 0.4), WATER, WATER_EDGE, 0.025),
+    'pool-kidney': (w, h) => poly(kidneyPts(w, h, 0), COPING, COPING_EDGE, 0.02) + poly(kidneyPts(w, h, 0.4), WATER, WATER_EDGE, 0.025),
+    'spa': (w, h) => El(0, 0, w / 2, h / 2, COPING, COPING_EDGE, 0.02) + El(0, 0, Math.max(0.2, w / 2 - 0.2), Math.max(0.2, h / 2 - 0.2), WATER, WATER_EDGE, 0.02) + [0, 1, 2, 3, 4, 5].map((i) => Ci(Math.cos((i * Math.PI) / 3) * w * 0.28, Math.sin((i * Math.PI) / 3) * h * 0.28, 0.05, '#e9f7fc')).join(''),
+    'quincho': (w, h) => {
+      // roofed pavilion: back wall with the parrilla grill, a long table with benches, posts at the corners
+      const wt = 0.3, gw = Math.min(1.8, w * 0.4);
+      let s = R(-w / 2, -h / 2, w, h, '#d8cfc0', '#9a8f7c', 0.03);
+      s += R(-w / 2, -h / 2, w, wt, '#a65a43', '#6e3b2c', 0.02);
+      s += R(-gw / 2, -h / 2 + wt, gw, Math.min(0.75, h * 0.2), '#3a3836', '#1e1d1c', 0.015);
+      for (let i = 1; i < 6; i++) s += Ln(-gw / 2 + (gw * i) / 6, -h / 2 + wt + 0.04, -gw / 2 + (gw * i) / 6, -h / 2 + wt + Math.min(0.75, h * 0.2) - 0.04, '#8a8a8a', 0.012);
+      s += R(-0.3, -h / 2 - 0.08, 0.6, wt + 0.16, '#8c4c38', '#5a2e22', 0.015);
+      const tw = Math.min(w * 0.6, 3.4), td = Math.min(h * 0.22, 0.9), ty = h * 0.12;
+      s += R(-tw / 2, ty - td / 2, tw, td, '#8a6a4a', '#5f4630', 0.015, 0.02);
+      for (const k of [-1, 1]) s += R(-tw / 2, ty + k * (td / 2 + 0.25) - 0.17, tw, 0.34, '#a8845d', '#7d5d3f', 0.012, 0.02);
+      s += Ln(-w / 2, 0, w / 2, 0, 'rgba(120,90,60,.5)', 0.02);
+      for (const x of [-1, 1]) for (const y of [-1, 1]) s += R(x * (w / 2 - 0.17) - 0.1, y * (h / 2 - 0.17) - 0.1, 0.2, 0.2, '#5e4636', '#3a2b20', 0.012);
+      return s + R(-w / 2, -h / 2, w, h, 'none', '#8b7a63', 0.05).replace('stroke-width="0.05"', 'stroke-width="0.05" stroke-dasharray=".4 .22"');
+    },
+    'parrilla': (w, h) => {
+      let s = R(-w / 2, -h / 2, w, h, '#a65a43', '#6e3b2c', 0.02);
+      s += R(-w / 2 + 0.08, -h / 2 + 0.2, w - 0.16, h - 0.28, '#3a3836', '#1e1d1c', 0.012);
+      for (let i = 1; i < 9; i++) s += Ln(-w / 2 + 0.1, -h / 2 + 0.2 + ((h - 0.28) * i) / 9, w / 2 - 0.1, -h / 2 + 0.2 + ((h - 0.28) * i) / 9, '#8a8a8a', 0.01);
+      return s + R(w / 2 - 0.45, -h / 2 + 0.02, 0.36, 0.16, '#8c4c38', '#5a2e22', 0.012);
+    },
+    'soccer': (w, h) => turned(w, h, soccer),
+    'basketball': (w, h) => turned(w, h, (a, b) => basketball(a, b, false)),
+    'basketball-half': (w, h) => turned(w, h, (a, b) => basketball(a, b, true))
+  };
+  Object.assign(ITEM, SITE);
+  const isSite = (it) => (C.items[it.kind] || {}).layer === 'landscape';
+
   function itemSvg(it) {
     const fn = ITEM[it.kind];
     const body = fn ? fn(it.w, it.h) : R(-it.w / 2, -it.h / 2, it.w, it.h, '#e6e1d8', '#8f877b', 0.015);
@@ -303,6 +456,145 @@ window.FP = window.FP || {};
   }
 
   /* ---------- walls & openings ---------- */
+  // A fence run, seen from above: a thin band with a post every couple of metres.
+  function fenceSvg(fe, render, cuts) {
+    const d = C.fences[fe.kind] || C.fences.large;
+    const L = Math.hypot(fe.x2 - fe.x1, fe.y2 - fe.y1);
+    if (L < 0.01) return '';
+    const ux = (fe.x2 - fe.x1) / L, uy = (fe.y2 - fe.y1) / L, nx = -uy, ny = ux;
+    const picket = fe.kind === 'picket';
+    const col = fe.color || d.color, edge = picket ? '#8d9399' : '#4d3b2a';
+    const t = picket ? 0.07 : 0.12, pw = picket ? 0.1 : 0.18, h = t / 2;
+    const Q = (s, k) => ({ x: fe.x1 + ux * s + nx * k, y: fe.y1 + uy * s + ny * k });
+    // gates cut the run open: draw only the stretches between them
+    let spans = [[0, L]];
+    for (const [c0, c1] of cuts || []) spans = G.subtract(spans, c0, c1);
+    let s = '<g data-k="fence" data-id="' + fe.id + '">';
+    s += '<line x1="' + f(fe.x1) + '" y1="' + f(fe.y1) + '" x2="' + f(fe.x2) + '" y2="' + f(fe.y2) + '" stroke="transparent" stroke-width=".5"/>';
+    for (const [a, b] of spans) {
+      const len = b - a;
+      if (len < 0.05) continue;
+      s += '<polygon points="' + ptsAttr([Q(a, -h), Q(b, -h), Q(b, h), Q(a, h)]) + '" fill="' + esc(col) + '" stroke="' + edge + '" stroke-width=".02"/>';
+      if (picket && render) { const p0 = Q(a, 0), p1 = Q(b, 0); s += '<line x1="' + f(p0.x) + '" y1="' + f(p0.y) + '" x2="' + f(p1.x) + '" y2="' + f(p1.y) + '" stroke="#c5c9ce" stroke-width="' + f(t * 0.7) + '" stroke-dasharray=".03 .09"/>'; }
+      const n = Math.max(1, Math.round(len / (picket ? 1.8 : 2.4)));
+      for (let i = 0; i <= n; i++) {
+        const c = Q(a + (len * i) / n, 0), q = pw / 2;
+        s += '<rect x="' + f(c.x - q) + '" y="' + f(c.y - q) + '" width="' + f(pw) + '" height="' + f(pw) + '" fill="' + (picket ? '#ffffff' : '#4d3b2a') + '" stroke="' + edge + '" stroke-width=".02"/>';
+      }
+    }
+    return s + '</g>';
+  }
+
+  const shade = (hex, k) => {
+    const n = parseInt(hex.slice(1), 16), tgt = k < 0 ? 0 : 255, a = Math.abs(k);
+    return '#' + [16, 8, 0].map((sh) => Math.round(((n >> sh) & 255) * (1 - a) + tgt * a).toString(16).padStart(2, '0')).join('');
+  };
+
+  // A gate seen from above: two posts, the leaf (or leaves) and, for swing gates, the arc they sweep.
+  function gateSvg(p, g, render) {
+    const geo = M.gateGeo(p, g);
+    if (!geo) return '';
+    const d = C.gates[g.kind] || C.gates.garden, col = g.color || d.color, v = geo.v, sw = g.swing === -1 ? -1 : 1;
+    const edge = '#33363b';
+    const P = (pt, k, u) => ({ x: pt.x + v.ux * (u || 0) + v.nx * k * sw, y: pt.y + v.uy * (u || 0) + v.ny * k * sw });
+    const line = (a, b, wd, c) => '<line x1="' + f(a.x) + '" y1="' + f(a.y) + '" x2="' + f(b.x) + '" y2="' + f(b.y) + '" stroke="' + c + '" stroke-width="' + f(wd) + '" stroke-linecap="butt"/>';
+    let s = '<g data-k="gate" data-id="' + g.id + '">';
+    s += '<polygon points="' + ptsAttr([P(geo.s, -0.3), P(geo.e, -0.3), P(geo.e, 0.35), P(geo.s, 0.35)]) + '" fill="transparent"/>';
+    const post = (pt) => '<polygon points="' + ptsAttr([P(pt, -0.09, -0.09), P(pt, -0.09, 0.09), P(pt, 0.09, 0.09), P(pt, 0.09, -0.09)]) + '" fill="' + shade(col, -0.35) + '" stroke="' + edge + '" stroke-width=".02"/>';
+    const swing = (hinge, free) => {
+      // free is where the closed leaf ends; the open leaf stands square to the fence on the swing side
+      const len = Math.hypot(free.x - hinge.x, free.y - hinge.y), open = P(hinge, len);
+      const ax = free.x - hinge.x, ay = free.y - hinge.y, bx = open.x - hinge.x, by = open.y - hinge.y;
+      const sweep = ax * by - ay * bx > 0 ? 1 : 0;
+      let o = '<path d="M' + f(free.x) + ' ' + f(free.y) + ' A' + f(len) + ' ' + f(len) + ' 0 0 ' + sweep + ' ' + f(open.x) + ' ' + f(open.y) + '" fill="none" stroke="' + shade(col, -0.25) + '" stroke-width=".015" stroke-dasharray=".06 .05"/>';
+      o += line(hinge, open, 0.03, shade(col, -0.2));
+      o += line(hinge, free, 0.085, edge) + line(hinge, free, 0.05, col);
+      return o;
+    };
+    if (d.slide) {
+      // closed panel in front of the fence, with its open position outlined
+      const open = g.hinge === 'end' ? 1 : -1, W = geo.w, off = 0.1;
+      const rect = (u0) => ptsAttr([P(geo.s, off, u0), P(geo.s, off + 0.07, u0), P(geo.s, off + 0.07, u0 + W), P(geo.s, off, u0 + W)]);
+      s += '<polygon points="' + rect(open * W) + '" fill="none" stroke="' + shade(col, -0.2) + '" stroke-width=".015" stroke-dasharray=".07 .05"/>';
+      s += '<polygon points="' + rect(0) + '" fill="' + col + '" stroke="' + edge + '" stroke-width=".02"/>';
+      s += line(P(geo.s, off + 0.035, open > 0 ? W : 0), P(geo.s, off + 0.035, open * W + (open > 0 ? W : 0)), 0.012, shade(col, -0.2));
+    } else if (d.leaves === 2) {
+      const mid = { x: geo.c.x, y: geo.c.y };
+      s += swing(geo.s, mid) + swing(geo.e, mid);
+    } else {
+      s += g.hinge === 'end' ? swing(geo.e, geo.s) : swing(geo.s, geo.e);
+    }
+    s += post(geo.s) + post(geo.e);
+    return s + '</g>';
+  }
+
+  // A gate seen from the front, for the library thumbnails. Returns the markup and the viewBox it needs.
+  function gateElev(kind, color, wOv, hOv) {
+    const d = C.gates[kind] || C.gates.garden, W = wOv || d.w, H = hOv || d.h, c = color || d.color;
+    const dk = shade(c, -0.35), pst = shade(c, -0.55);
+    const Y = (y) => f(H - y);
+    const R = (x0, y0, x1, y1, fill, stroke) => '<rect x="' + f(x0) + '" y="' + Y(y1) + '" width="' + f(x1 - x0) + '" height="' + f(y1 - y0) + '" fill="' + fill + '"' + (stroke ? ' stroke="' + stroke + '" stroke-width=".012"' : '') + '/>';
+    const Ln = (x0, y0, x1, y1, wd, col) => '<line x1="' + f(x0) + '" y1="' + Y(y0) + '" x2="' + f(x1) + '" y2="' + Y(y1) + '" stroke="' + col + '" stroke-width="' + wd + '"/>';
+    const leaf = (x0, x1) => {
+      const w = x1 - x0, y0 = 0.08, top = H;
+      let o = '';
+      switch (d.style) {
+        case 'boards': {
+          const n = Math.max(3, Math.round(w / 0.14)), bw = w / n;
+          for (let i = 0; i < n; i++) o += R(x0 + i * bw, y0, x0 + (i + 1) * bw, top - 0.02, i % 2 ? shade(c, -0.06) : c, dk);
+          o += R(x0, top - 0.2, x1, top - 0.12, dk) + R(x0, y0 + 0.06, x1, y0 + 0.14, dk) + Ln(x0, y0 + 0.1, x1, top - 0.16, 0.05, dk);
+          return o;
+        }
+        case 'picket': {
+          const pitch = 0.105, n = Math.max(2, Math.floor(w / pitch)), step = w / n;
+          for (let i = 0; i < n; i++) {
+            const xa = x0 + i * step + 0.01, xb = x0 + (i + 1) * step - 0.01;
+            o += '<polygon points="' + f(xa) + ',' + Y(y0) + ' ' + f(xb) + ',' + Y(y0) + ' ' + f(xb) + ',' + Y(top - 0.07) + ' ' + f((xa + xb) / 2) + ',' + Y(top) + ' ' + f(xa) + ',' + Y(top - 0.07) + '" fill="' + c + '" stroke="' + shade(c, -0.3) + '" stroke-width=".01"/>';
+          }
+          return o + R(x0, top * 0.25, x1, top * 0.25 + 0.05, shade(c, -0.15)) + R(x0, top * 0.7, x1, top * 0.7 + 0.05, shade(c, -0.15));
+        }
+        case 'arched': {
+          const arch = Math.min(0.22, w * 0.25);
+          o += '<path d="M' + f(x0) + ' ' + Y(y0) + ' L' + f(x0) + ' ' + Y(top - arch) + ' Q' + f((x0 + x1) / 2) + ' ' + Y(top + arch) + ' ' + f(x1) + ' ' + Y(top - arch) + ' L' + f(x1) + ' ' + Y(y0) + ' Z" fill="' + c + '" stroke="' + dk + '" stroke-width=".015"/>';
+          const n = Math.max(3, Math.round(w / 0.16));
+          for (let i = 1; i < n; i++) o += Ln(x0 + (w * i) / n, y0, x0 + (w * i) / n, top - arch - 0.02, 0.012, dk);
+          return o + R(x0, top * 0.3, x1, top * 0.3 + 0.07, dk) + R(x0, top * 0.62, x1, top * 0.62 + 0.07, dk);
+        }
+        case 'rails': {
+          for (let i = 0; i < 5; i++) { const yb = 0.18 + (i * (top - 0.3)) / 4; o += R(x0, yb, x1, yb + 0.06, c, dk); }
+          o += R(x0, y0, x0 + 0.06, top, c, dk) + R(x1 - 0.06, y0, x1, top, c, dk) + R((x0 + x1) / 2 - 0.03, y0, (x0 + x1) / 2 + 0.03, top, c, dk) + Ln(x0, 0.2, x1, top - 0.05, 0.04, dk);
+          return o;
+        }
+        case 'bars': {
+          const n = Math.max(4, Math.round(w / 0.11)), step = w / n;
+          for (let i = 0; i <= n; i++) {
+            const x = x0 + i * step;
+            o += Ln(x, y0, x, top - 0.02, 0.022, c) + '<polygon points="' + f(x - 0.03) + ',' + Y(top - 0.02) + ' ' + f(x + 0.03) + ',' + Y(top - 0.02) + ' ' + f(x) + ',' + Y(top + 0.07) + '" fill="' + c + '"/>';
+          }
+          return o + R(x0, top - 0.08, x1, top - 0.03, c) + R(x0, y0 + 0.1, x1, y0 + 0.15, c) + R(x0, top * 0.5, x1, top * 0.5 + 0.04, c);
+        }
+        case 'slats': {
+          const n = Math.max(4, Math.floor((top - y0) / 0.11)), step = (top - y0) / n;
+          for (let i = 0; i < n; i++) o += R(x0, y0 + i * step + 0.01, x1, y0 + (i + 1) * step - 0.01, i % 2 ? shade(c, -0.08) : c);
+          return o + R(x0, y0, x0 + 0.05, top, dk) + R(x1 - 0.05, y0, x1, top, dk);
+        }
+        default: { // mesh
+          o += R(x0, y0, x1, top, 'none', dk);
+          for (let x = x0 + 0.1; x < x1; x += 0.1) o += Ln(x, y0, x, top, 0.008, shade(c, -0.1));
+          for (let y = y0 + 0.1; y < top; y += 0.1) o += Ln(x0, y, x1, y, 0.008, shade(c, -0.1));
+          return o + R(x0, y0, x1, y0 + 0.04, dk) + R(x0, top - 0.04, x1, top, dk) + R(x0, y0, x0 + 0.04, top, dk) + R(x1 - 0.04, y0, x1, top, dk);
+        }
+      }
+    };
+    let s = '';
+    if (d.slide) s += leaf(0.1, W - 0.1) + R(-0.05, 0, W + 0.05, 0.05, pst);
+    else if (d.leaves === 2) s += leaf(0.1, W / 2 - 0.012) + leaf(W / 2 + 0.012, W - 0.1);
+    else s += leaf(0.1, W - 0.1);
+    s += R(-0.1, 0, 0.1, H + 0.08, pst) + R(W - 0.1, 0, W + 0.1, H + 0.08, pst);
+    s += R(-0.4, -0.03, W + 0.4, 0.0, '#7a8f6b');
+    return { svg: s, vb: '-0.4 -0.3 ' + f(W + 0.8) + ' ' + f(H + 0.45) };
+  }
+
   function wallSvg(p, w, render) {
     const v = M.wallVec(w);
     const ops = p.openings.filter((o) => o.wall === w.id).map((o) => M.openingGeo(p, o)).filter(Boolean).sort((a, b) => a.from - b.from);
@@ -378,45 +670,40 @@ window.FP = window.FP || {};
     return s;
   }
 
-  // A chain of dimensions between wall faces. Every wall adds both faces as stops, so spans read as
-  // clear sizes inside the walls; the short stretch across a wall gets ticks but no number.
-  function faceStops(lines, lo, hi) {
-    const v = [lo, hi];
-    for (const [c, t] of lines) v.push(c - t / 2, c + t / 2);
-    const out = [];
-    for (const x of v.filter((u) => u >= lo - 1e-6 && u <= hi + 1e-6).sort((u, w) => u - w)) if (!out.length || x - out[out.length - 1] > 0.005) out.push(x);
-    return out;
-  }
-  function chain(stops, fixed, horiz, side) {
-    let s = '';
-    for (let i = 0; i + 1 < stops.length; i++) {
-      const a = stops[i], b = stops[i + 1];
-      const lbl = b - a >= 0.35 ? fm(b - a) : '';
-      s += horiz ? dimLine(a, fixed, b, fixed, lbl, side) : dimLine(fixed, a, fixed, b, lbl, side);
+  // Each separate building (a group of walls that touch) is measured once, outer face of the outer wall to outer
+  // face of the outer wall, along its top and its left side. Room sizes stay on the room labels.
+  function structures(p) {
+    const boxes = p.walls.map((w) => {
+      const L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1) || 1, nx = -(w.y2 - w.y1) / L * w.t / 2, ny = (w.x2 - w.x1) / L * w.t / 2;
+      const xs = [w.x1 + nx, w.x1 - nx, w.x2 + nx, w.x2 - nx], ys = [w.y1 + ny, w.y1 - ny, w.y2 + ny, w.y2 - ny];
+      return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+    });
+    const group = boxes.map((_, i) => i);
+    const find = (i) => { while (group[i] !== i) { group[i] = group[group[i]]; i = group[i]; } return i; };
+    const tol = 0.05;
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i], c = boxes[j];
+        if (a.x0 <= c.x1 + tol && c.x0 <= a.x1 + tol && a.y0 <= c.y1 + tol && c.y0 <= a.y1 + tol) group[find(i)] = find(j);
+      }
     }
-    return s;
+    const out = new Map();
+    boxes.forEach((b, i) => {
+      const k = find(i), g = out.get(k);
+      if (!g) out.set(k, { x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, n: 1 });
+      else { g.x0 = Math.min(g.x0, b.x0); g.x1 = Math.max(g.x1, b.x1); g.y0 = Math.min(g.y0, b.y0); g.y1 = Math.max(g.y1, b.y1); g.n++; }
+    });
+    // a lone wall or two is a fence-like line, not a building
+    return [...out.values()].filter((g) => g.n >= 3 && g.x1 - g.x0 > 1 && g.y1 - g.y0 > 1);
   }
 
   function dimensions(p) {
-    const hb = M.houseBounds(p);
     let s = '<g class="dims" font-family="Avenir Next, Helvetica Neue, Arial, sans-serif" fill="' + PL.text + '" paint-order="stroke" stroke-linejoin="round" pointer-events="none">';
     s += dimLine(0, -1.1, p.lot.w, -1.1, fm(p.lot.w) + ' m', 1);
     s += dimLine(-1.1, 0, -1.1, p.lot.h, fm(p.lot.h) + ' m', 1);
-    if (hb && p.walls.length) {
-      // wall lines and the thickest wall on each
-      const vx = new Map(), hy = new Map();
-      for (const w of p.walls) {
-        if (Math.abs(w.x1 - w.x2) < 1e-6) vx.set(w.x1, Math.max(vx.get(w.x1) || 0, w.t));
-        if (Math.abs(w.y1 - w.y2) < 1e-6) hy.set(w.y1, Math.max(hy.get(w.y1) || 0, w.t));
-      }
-      // overall size to the outer faces of the outermost walls
-      const ext = (lines, lo, hi) => { let a = lo, b = hi; for (const [c, t] of lines) { a = Math.min(a, c - t / 2); b = Math.max(b, c + t / 2); } return [a, b]; };
-      const [x0, x1] = ext(vx, hb.x, hb.x + hb.w), [y0, y1] = ext(hy, hb.y, hb.y + hb.h);
-      s += dimLine(x0, y0 - 1.0, x1, y0 - 1.0, fm(x1 - x0) + ' m', 1);
-      s += dimLine(x0 - 1.0, y0, x0 - 1.0, y1, fm(y1 - y0) + ' m', 1);
-      const sx = faceStops(vx, x0, x1), sy = faceStops(hy, y0, y1);
-      if (sx.length <= 48) s += chain(sx, y1 + 1.0, true, -1);
-      if (sy.length <= 48) s += chain(sy, x1 + 1.0, false, -1);
+    for (const g of structures(p)) {
+      s += dimLine(g.x0, g.y0 - 1.0, g.x1, g.y0 - 1.0, fm(g.x1 - g.x0) + ' m', 1);
+      s += dimLine(g.x0 - 1.0, g.y0, g.x0 - 1.0, g.y1, fm(g.y1 - g.y0) + ' m', 1);
     }
     return s + '</g>';
   }
@@ -445,13 +732,16 @@ window.FP = window.FP || {};
     if (L.landscape) {
       s += '<g class="areas">';
       for (const a of p.areas) {
-        const fill = render ? GROUND_FILL[a.material] || '#ccc' : (C.materials[a.material] || {}).flat || '#ccc';
+        const fid = groundFillId(a.material), fill = render ? (fid ? 'url(#' + fid + ')' : '#ccc') : (C.materials[a.material] || {}).flat || '#ccc';
         s += '<g data-k="area" data-id="' + a.id + '">';
         s += '<polygon points="' + ptsAttr(a.pts) + '" fill="' + fill + '"' + (render ? '' : ' stroke="' + PL.areaEdge + '" stroke-width=".02"' + (dark ? ' fill-opacity=".35"' : '')) + '/>';
         if (render && a.material === 'water') s += '<polygon points="' + ptsAttr(a.pts) + '" fill="url(#pat-water)" stroke="#eeeae0" stroke-width=".22"/>';
         if (render && a.material === 'hedge') s += '<polygon points="' + ptsAttr(a.pts) + '" fill="none" stroke="#3d6329" stroke-width=".04"/>';
         s += '</g>';
       }
+      s += '</g>';
+      s += '<g class="sites"' + (render ? ' filter="url(#sh-item)"' : '') + '>';
+      for (const it of p.items) if (isSite(it)) s += itemSvg(it);
       s += '</g>';
     }
 
@@ -475,7 +765,7 @@ window.FP = window.FP || {};
 
     if (L.furniture) {
       s += '<g class="items"' + (render ? ' filter="url(#sh-item)"' : '') + '>';
-      for (const it of p.items) s += itemSvg(it);
+      for (const it of p.items) if (!isSite(it)) s += itemSvg(it);
       s += '</g>';
     }
 
@@ -488,6 +778,13 @@ window.FP = window.FP || {};
     }
 
     if (L.landscape) {
+      s += '<g class="fences"' + (render ? ' filter="url(#sh-wall)"' : '') + '>';
+      for (const fe of p.fences || []) {
+        const cuts = (p.gates || []).filter((g) => g.fence === fe.id).map((g) => M.gateGeo(p, g)).filter(Boolean).map((q) => [q.from, q.to]);
+        s += fenceSvg(fe, render, cuts);
+      }
+      for (const g of p.gates || []) s += gateSvg(p, g, render);
+      s += '</g>';
       s += '<g class="plants"' + (render ? ' filter="url(#sh-tree)"' : '') + '>';
       for (const pl of p.plants) s += plantSvg(pl, render);
       s += '</g>';
@@ -510,5 +807,5 @@ window.FP = window.FP || {};
     return '<svg xmlns="http://www.w3.org/2000/svg" width="' + Math.round(w * ppm) + '" height="' + Math.round(h * ppm) + '" viewBox="' + f(x) + ' ' + f(y) + ' ' + f(w) + ' ' + f(h) + '">' + scene(p, opts) + '</svg>';
   }
 
-  FP.draw = { scene, documentSvg, itemSvg, plantSvg, defs, fm };
+  FP.draw = { scene, documentSvg, itemSvg, plantSvg, fenceSvg, gateSvg, gateElev, defs, fm, groundTile, groundFillId };
 })();

@@ -12,23 +12,30 @@ window.FP = window.FP || {};
   const m2 = (v) => v.toFixed(1) + ' m²';
   let sideTab = 'inspector';
 
+  // name is the short label shown in the rail; label is the longer tooltip. A string entry is a section heading.
   const TOOLS = [
-    { id: 'select', icon: 'select', key: 'V', label: 'Select and move' },
-    { id: 'hand', icon: 'hand', key: 'H', label: 'Pan (or hold Space)' },
-    null,
-    { id: 'wall', icon: 'wall', key: 'W', label: 'Walls' },
-    { id: 'room', icon: 'room', key: 'R', label: 'Rooms' },
-    { id: 'door', icon: 'door', key: 'D', label: 'Doors and openings' },
-    { id: 'window', icon: 'window', key: 'N', label: 'Windows' },
-    null,
-    { id: 'item', icon: 'item', key: 'F', label: 'Furniture and objects' },
-    { id: 'area', icon: 'area', key: 'A', label: 'Ground surfaces (paths, driveway, beds, pool)' },
-    { id: 'plant', icon: 'plant', key: 'T', label: 'Trees and plants' },
-    null,
-    { id: 'measure', icon: 'measure', key: 'M', label: 'Measure' }
+    'View',
+    { id: 'select', icon: 'select', key: 'V', name: 'Select', label: 'Select and move' },
+    { id: 'hand', icon: 'hand', key: 'H', name: 'Pan', label: 'Pan (or hold Space)' },
+    'House',
+    { id: 'wall', icon: 'wall', key: 'W', name: 'Walls', label: 'Draw walls' },
+    { id: 'room', icon: 'room', key: 'R', name: 'Rooms', label: 'Draw rooms' },
+    { id: 'door', icon: 'door', key: 'D', name: 'Doors', label: 'Doors and openings' },
+    { id: 'window', icon: 'window', key: 'N', name: 'Windows', label: 'Windows' },
+    'Furnish & plot',
+    { id: 'item', icon: 'item', key: 'F', name: 'Furniture', label: 'Furniture and objects' },
+    { id: 'site', icon: 'pool', key: 'P', name: 'Backyard', label: 'Pools, quinchos and sports fields' },
+    { id: 'area', icon: 'area', key: 'A', name: 'Ground', label: 'Ground surfaces (paths, driveway, beds, pool)' },
+    { id: 'plant', icon: 'plant', key: 'T', name: 'Plants', label: 'Trees and plants' },
+    { id: 'fence', icon: 'fence', key: 'G', name: 'Fences', label: 'Fences (large and white picket)' },
+    { id: 'gate', icon: 'gate', key: 'J', name: 'Gates', label: 'Gates: click on a fence to place one' },
+    'Measure',
+    { id: 'measure', icon: 'measure', key: 'M', name: 'Distance', label: 'Measure the distance between two points' },
+    { id: 'laser', icon: 'laser', key: 'L', name: 'Laser gap', label: 'Laser measure: how wide is this space?' },
+    { id: 'zone', icon: 'zone', key: 'Z', name: 'Area', label: 'Measure an area (drag a rectangle)' }
   ];
-  const KIND_LABEL = { wall: 'Wall', opening: 'Opening', room: 'Room', area: 'Ground surface', plant: 'Plant', item: 'Object' };
-  const KIND_ICON = { wall: 'wall', opening: 'door', room: 'room', area: 'area', plant: 'plant', item: 'item' };
+  const KIND_LABEL = { wall: 'Wall', opening: 'Opening', room: 'Room', area: 'Ground surface', plant: 'Plant', fence: 'Fence', gate: 'Gate', item: 'Object' };
+  const KIND_ICON = { wall: 'wall', opening: 'door', room: 'room', area: 'area', plant: 'plant', fence: 'fence', gate: 'gate', item: 'item' };
 
   /* ---------- small DOM helpers ---------- */
   function el(tag, attrs, ...kids) {
@@ -81,10 +88,10 @@ window.FP = window.FP || {};
     const rail = $('rail');
     rail.innerHTML = '';
     for (const t of TOOLS) {
-      if (!t) { rail.append(el('div', { class: 'sep' })); continue; }
+      if (typeof t === 'string') { rail.append(el('div', { class: 'rail-head' }, t)); continue; }
       rail.append(el('button', {
         class: 'tool', 'data-tool': t.id, title: t.label + ' (' + t.key + ')', 'aria-label': t.label,
-        html: I[t.icon] + '<span class="key">' + t.key + '</span>', onclick: () => A().setTool(t.id)
+        html: I[t.icon] + '<span class="name">' + t.name + '</span><span class="key">' + t.key + '</span>', onclick: () => A().setTool(t.id)
       }));
     }
   }
@@ -98,7 +105,7 @@ window.FP = window.FP || {};
 
   function updateTool() {
     const st = S(), o = st.opts, bar = $('optbar');
-    document.querySelectorAll('.tool').forEach((b) => { b.classList.toggle('active', b.dataset.tool === st.tool); b.disabled = !!st.preview; });
+    document.querySelectorAll('.tool').forEach((b) => { b.classList.toggle('active', b.dataset.tool === (st.tool === 'item' && st.site ? 'site' : st.tool)); b.disabled = !!st.preview; });
     $('stage').className = 'stage tool-' + (st.preview ? 'hand' : st.tool) + (st.mode === '3d' ? ' mode-3d' : '');
     bar.innerHTML = '';
     if (st.preview) { suggestionBar(); $('drawer').hidden = true; return; }
@@ -136,12 +143,17 @@ window.FP = window.FP || {};
           lbl('Width', numInput(o.openW.window, (v) => { o.openW.window = v; }, { step: 0.05, min: 0.3 })),
           hint('Click on a wall to place a window'));
         break;
-      case 'item':
-        bar.append(el('span', { class: 'title' }, C.items[o.item].label),
+      case 'item': {
+        const idef = C.items[o.item], sz = o.itemSize[o.item] || [idef.w, idef.h];
+        bar.append(el('span', { class: 'title' }, idef.label),
+          ...(st.site ? [
+            lbl('Width', numInput(sz[0], (v) => { o.itemSize[o.item] = [Math.max(0.5, v), sz[1]]; updateTool(); }, { step: 0.5, min: 0.5 })),
+            lbl('Depth', numInput(sz[1], (v) => { o.itemSize[o.item] = [sz[0], Math.max(0.5, v)]; updateTool(); }, { step: 0.5, min: 0.5 }))] : []),
           el('button', { class: 'icon-btn', title: 'Rotate left ([)', html: I.rotate, style: 'transform:scaleX(-1)', onclick: () => FP.editor.rotateGhost(-90) }),
           el('button', { class: 'icon-btn', title: 'Rotate right (])', html: I.rotate, onclick: () => FP.editor.rotateGhost(90) }),
-          hint((st.mode === '3d' ? 'Click the floor to place' : 'Click to place') + ' · [ and ] rotate · pick another piece in the library'));
+          hint((st.mode === '3d' ? 'Click the floor to place' : 'Click to place') + ' · [ and ] rotate · pick another piece in the library' + (st.site ? ' · resize it any time by selecting it' : '')));
         break;
+      }
       case 'area':
         bar.append(el('span', { class: 'title' }, C.materials[o.material].label),
           seg(o.shape, [['rect', 'Rectangle'], ['poly', 'Polygon']], set('shape')),
@@ -150,8 +162,36 @@ window.FP = window.FP || {};
       case 'plant':
         bar.append(el('span', { class: 'title' }, C.plants[o.plant].label), hint('Click to plant · drag the handle on a selected plant to resize its canopy'));
         break;
+      case 'fence':
+        bar.append(el('span', { class: 'title' }, 'Fences'),
+          seg(o.fenceKind, Object.entries(C.fences).map(([k, v]) => [k, v.label]), set('fenceKind')),
+          lbl('Height', numInput(o.fenceH[o.fenceKind], (v) => { o.fenceH[o.fenceKind] = Math.max(0.3, Math.min(3.6, v)); updateTool(); }, { step: 0.1, min: 0.3, max: 3.6 })),
+          hint('Click each corner · double-click or Enter to finish · Shift any angle'));
+        break;
+      case 'gate': {
+        const gd = C.gates[o.gateKind];
+        bar.append(el('span', { class: 'title' }, gd.label),
+          lbl('Width', numInput(o.gateW[o.gateKind], (v) => { o.gateW[o.gateKind] = Math.max(0.4, Math.min(8, v)); updateTool(); }, { step: 0.1, min: 0.4, max: 8 })),
+          lbl('Height', numInput(o.gateH[o.gateKind], (v) => { o.gateH[o.gateKind] = Math.max(0.4, Math.min(3.6, v)); updateTool(); }, { step: 0.1, min: 0.4, max: 3.6 })),
+          hint('Click on a fence to place the gate · the side of the fence your mouse is on is the side it opens to · pick a style in the library'));
+        break;
+      }
+      case 'laser':
+        bar.append(el('span', { class: 'title' }, 'Laser measure'),
+          lbl(el('input', { type: 'checkbox', checked: o.laserAll, onchange: (e) => set('laserAll')(e.target.checked) }), 'Stop at trees and furniture too'),
+          btn('Clear marks', () => FP.editor.clearMarks(), ''),
+          hint('Hover open ground to read the gap · click to pin it · Alt hides the laser'));
+        break;
+      case 'zone':
+        bar.append(el('span', { class: 'title' }, 'Measure area'),
+          btn('Clear marks', () => FP.editor.clearMarks(), ''),
+          hint('Drag a rectangle to see its size and m²'));
+        break;
       case 'measure':
         bar.append(el('span', { class: 'title' }, 'Measure'), hint('Drag between two points · Shift for any angle'));
+        break;
+      case 'select':
+        bar.append(el('span', { class: 'title' }, 'Select'), hint('Click a thing · drag a box to select many (left to right: fully inside, right to left: touching) · Shift-click adds · Ctrl+G groups · Space or H to pan'));
         break;
       case 'hand':
         bar.append(el('span', { class: 'title' }, 'Pan'), hint('Drag to move around · scroll to zoom'));
@@ -222,13 +262,13 @@ window.FP = window.FP || {};
 
   function buildDrawer() {
     const st = S(), d = $('drawer');
-    const show = st.tool === 'item' || st.tool === 'plant' || st.tool === 'area';
+    const show = st.tool === 'item' || st.tool === 'plant' || st.tool === 'area' || st.tool === 'fence' || st.tool === 'gate';
     d.hidden = !show;
     if (!show) return;
     d.innerHTML = '';
     if (st.tool === 'item') {
       const groups = {};
-      for (const [k, v] of Object.entries(C.items)) (groups[v.group] = groups[v.group] || []).push([k, v]);
+      for (const [k, v] of Object.entries(C.items)) if ((v.group === 'Pools, quinchos & sports') === !!st.site) (groups[v.group] = groups[v.group] || []).push([k, v]);
       for (const [g, list] of Object.entries(groups)) {
         d.append(el('h3', {}, g));
         d.append(el('div', { class: 'lib' }, list.map(([k, v]) => {
@@ -237,6 +277,21 @@ window.FP = window.FP || {};
           return el('button', { class: 'lib-item' + (st.opts.item === k ? ' active' : ''), title: v.label + ' · ' + v.w + ' × ' + v.h + ' m', html: svg + '<span>' + v.label + '</span>', onclick: () => { st.opts.item = k; st.opts.itemRot = 0; updateTool(); } });
         })));
       }
+    } else if (st.tool === 'fence') {
+      d.append(el('h3', {}, 'Fences'));
+      d.append(el('div', { class: 'lib' }, Object.entries(C.fences).map(([k, v]) => {
+        const svg = '<svg viewBox="-0.2 -0.5 4.4 1" preserveAspectRatio="xMidYMid meet"><rect x="-0.2" y="-0.5" width="4.4" height="1" fill="#b9d3a0"/>' + FP.draw.fenceSvg({ id: 'lib' + k, kind: k, x1: 0, y1: 0, x2: 4, y2: 0, h: v.h }, true) + '</svg>';
+        return el('button', { class: 'lib-item' + (st.opts.fenceKind === k ? ' active' : ''), title: v.hint, html: svg + '<span>' + v.label + '<br>' + st.opts.fenceH[k].toFixed(1) + ' m high</span>', onclick: () => { st.opts.fenceKind = k; updateTool(); } });
+      })));
+      d.append(el('p', { class: 'note', style: 'margin:14px 4px 0' }, 'Large fences are solid boundary or privacy fences; the picket fence is a low white garden fence. Change any fence\'s height or colour by selecting it.'));
+    } else if (st.tool === 'gate') {
+      d.append(el('h3', {}, 'Gates'));
+      d.append(el('div', { class: 'lib' }, Object.entries(C.gates).map(([k, v]) => {
+        const e = FP.draw.gateElev(k);
+        const svg = '<svg viewBox="' + e.vb + '" preserveAspectRatio="xMidYMid meet" style="background:#dfeacf;border-radius:6px">' + e.svg + '</svg>';
+        return el('button', { class: 'lib-item' + (st.opts.gateKind === k ? ' active' : ''), title: v.hint, html: svg + '<span>' + v.label + '<br>' + st.opts.gateW[k].toFixed(1) + ' m wide</span>', onclick: () => { st.opts.gateKind = k; updateTool(); } });
+      })));
+      d.append(el('p', { class: 'note', style: 'margin:14px 4px 0' }, 'Click on any fence to cut it open and fit a gate. Select a gate to change its style, width, height, colour or the side it opens to; drag it to slide it along the fence.'));
     } else if (st.tool === 'plant') {
       d.append(el('h3', {}, 'Trees and plants'));
       d.append(el('div', { class: 'lib' }, Object.entries(C.plants).map(([k, v]) => {
@@ -245,12 +300,15 @@ window.FP = window.FP || {};
         return el('button', { class: 'lib-item' + (st.opts.plant === k ? ' active' : ''), html: svg + '<span>' + v.label + '<br>⌀ ' + (v.r * 2).toFixed(1) + ' m</span>', onclick: () => { st.opts.plant = k; updateTool(); } });
       })));
     } else {
-      d.append(el('h3', {}, 'Ground materials'));
-      const fills = { lawn: 'pat-grass', concrete: 'pat-concrete-j', pavers: 'pat-pavers', gravel: 'pat-gravel', deck: 'pat-deck', mulch: 'pat-mulch', hedge: 'pat-hedge', water: 'g-water', sand: 'pat-sand' };
-      d.append(el('div', { class: 'lib' }, Object.entries(C.materials).map(([k, v]) => {
-        const svg = '<svg class="swatch" viewBox="0 0 3 1.2" preserveAspectRatio="xMidYMid slice"><rect width="3" height="1.2" fill="url(#' + fills[k] + ')"/></svg>';
-        return el('button', { class: 'lib-item' + (st.opts.material === k ? ' active' : ''), html: svg + '<span>' + v.label + '</span>', onclick: () => { st.opts.material = k; updateTool(); } });
-      })));
+      const groups = {};
+      for (const [k, v] of Object.entries(C.materials)) (groups[v.group || 'Ground'] = groups[v.group || 'Ground'] || []).push([k, v]);
+      for (const [g, list] of Object.entries(groups)) {
+        d.append(el('h3', {}, g));
+        d.append(el('div', { class: 'lib' }, list.map(([k, v]) => {
+          const svg = '<svg class="swatch" viewBox="0 0 3 1.2" preserveAspectRatio="xMidYMid slice"><rect width="3" height="1.2" fill="url(#' + FP.draw.groundFillId(k) + ')"/></svg>';
+          return el('button', { class: 'lib-item' + (st.opts.material === k ? ' active' : ''), html: svg + '<span>' + v.label + '</span>', onclick: () => { st.opts.material = k; updateTool(); } });
+        })));
+      }
       d.append(el('p', { class: 'note', style: 'margin:14px 4px 0' }, 'Undrawn ground counts as lawn. Surfaces drawn later sit on top, so draw a pool after its deck.'));
     }
   }
@@ -285,6 +343,7 @@ window.FP = window.FP || {};
     const st = S(), p = P();
     const wrap = el('div');
     if (st.preview) return suggestionView();
+    if (st.multi.length > 1) return multiInspector();
     const sel = st.sel;
     const e = sel && M.find(p, sel.k, sel.id);
     if (!e) return projectInspector();
@@ -322,6 +381,7 @@ window.FP = window.FP || {};
       }
       wrap.append(el('div', { class: 'actions' },
         btn('Add walls around', () => edit((q) => { const made = M.addPolyWalls(q, e.pts, S().opts.wallT, 'interior'); for (const m of made) m.kind = M.classifyWall(q, m); }), '', 'wall'),
+        e.use === 'indoor' ? btn('Select whole house', () => { const r = M.houseRefs(P(), e.id); if (r) A().selectMany(r); }, '', 'group') : null,
         dup, del));
       wrap.append(el('p', { class: 'note', style: 'margin-top:14px' }, 'Sizes are measured inside the walls. Changing width or depth moves the right or bottom wall, like dragging it; the room on the other side gets smaller.'));
     } else if (sel.k === 'wall') {
@@ -385,6 +445,40 @@ window.FP = window.FP || {};
         el('div', { class: 'row2' }, field('X', numInput(e.x, (v) => edit(() => { e.x = v; }))), field('Y', numInput(e.y, (v) => edit(() => { e.y = v; }))))
       );
       wrap.append(el('div', { class: 'actions' }, dup, del));
+    } else if (sel.k === 'fence') {
+      const d = C.fences[e.kind] || C.fences.large, L = Math.hypot(e.x2 - e.x1, e.y2 - e.y1), ux = (e.x2 - e.x1) / (L || 1), uy = (e.y2 - e.y1) / (L || 1);
+      const woods = [['#8a6a4a', 'Oak'], ['#6b4f36', 'Walnut'], ['#b08d62', 'Cedar'], ['#4b4f55', 'Charcoal'], ['#2f3d55', 'Navy'], ['#4b5d4f', 'Forest'], ['#d9d2c6', 'Greige']];
+      const whites = [['#ffffff', 'White'], ['#f3eee4', 'Cream'], ['#e8dfcf', 'Ivory'], ['#c9d9e3', 'Sky'], ['#c4cdb8', 'Sage']];
+      wrap.append(head('fence', d.label, fm(L) + ' m long · ' + fm(e.h) + ' m high'));
+      wrap.append(
+        field('Style', selectInput(e.kind, pairs(C.fences), (v) => edit(() => { e.kind = v; e.h = C.fences[v].h; e.color = null; delete e.color; }))),
+        field('Height', numInput(e.h, (v) => edit(() => { e.h = Math.max(0.3, Math.min(3.6, v)); }), { step: 0.1, min: 0.3, max: 3.6 })),
+        field('Length', numInput(L, (v) => edit(() => { const l = Math.max(0.2, v); e.x2 = G.round(e.x1 + ux * l); e.y2 = G.round(e.y1 + uy * l); }))),
+        block('Colour', swatchInput(e.color, e.kind === 'picket' ? whites : woods, (c) => edit(() => { if (c) e.color = c; else delete e.color; }), 'Default (' + d.label + ')'))
+      );
+      wrap.append(el('div', { class: 'actions' }, btn('Add a gate here', () => edit((q) => {
+        const o = S().opts, kind = o.gateKind, w = Math.min(o.gateW[kind], Math.max(0.4, L - 0.4));
+        const gt = { id: M.uid('g'), fence: e.id, pos: L / 2, w, h: o.gateH[kind], kind, swing: 1, hinge: 'start' };
+        q.gates.push(gt); M.clampGate(q, gt);
+      }), ''), dup, del));
+      wrap.append(el('p', { class: 'note', style: 'margin-top:14px' }, 'Drag a fence to move it, or a square handle to move one end; fence runs that meet at a corner stay joined.'));
+    } else if (sel.k === 'gate') {
+      const d = C.gates[e.kind] || C.gates.garden, fe = M.find(P(), 'fence', e.fence), L = fe ? Math.hypot(fe.x2 - fe.x1, fe.y2 - fe.y1) : 0;
+      const cols = [['#8a6a4a', 'Oak'], ['#6b4f36', 'Walnut'], ['#ffffff', 'White'], ['#5f7d68', 'Sage'], ['#2f3d55', 'Navy'], ['#26282b', 'Black'], ['#3d4146', 'Charcoal'], ['#a8adb2', 'Galvanised']];
+      wrap.append(head('gate', d.label, fm(e.w) + ' m wide · ' + fm(e.h) + ' m high'));
+      wrap.append(
+        field('Style', selectInput(e.kind, pairs(C.gates), (v) => edit((q) => { e.kind = v; e.w = C.gates[v].w; e.h = C.gates[v].h; delete e.color; M.clampGate(q, e); }))),
+        el('div', { class: 'row2' },
+          field('Width', numInput(e.w, (v) => edit((q) => { e.w = Math.max(0.4, v); M.clampGate(q, e); }), { step: 0.1, min: 0.4 })),
+          field('Height', numInput(e.h, (v) => edit(() => { e.h = Math.max(0.4, Math.min(3.6, v)); }), { step: 0.1, min: 0.4, max: 3.6 }))),
+        field('Position', numInput(e.pos, (v) => edit((q) => { e.pos = v; M.clampGate(q, e); }), { step: 0.1 })),
+        el('div', { class: 'row2' },
+          field('Opens to', selectInput(String(e.swing === -1 ? -1 : 1), [['1', 'Side A'], ['-1', 'Side B']], (v) => edit(() => { e.swing = +v; }))),
+          d.leaves === 2 ? el('span') : field(d.slide ? 'Slides' : 'Hinge', selectInput(e.hinge === 'end' ? 'end' : 'start', d.slide ? [['start', 'Towards start'], ['end', 'Towards end']] : [['start', 'At start'], ['end', 'At end']], (v) => edit(() => { e.hinge = v; })))),
+        block('Colour', swatchInput(e.color, cols, (c) => edit(() => { if (c) e.color = c; else delete e.color; }), 'Default (' + d.label + ')'))
+      );
+      wrap.append(el('div', { class: 'actions' }, dup, del));
+      wrap.append(el('p', { class: 'note', style: 'margin-top:14px' }, 'Drag the gate along its fence, or use the Position field. Gates are walked through in the first-person view.' + (fe ? ' It sits on a ' + fm(L) + ' m run of fence.' : '')));
     } else if (sel.k === 'item') {
       const d = C.items[e.kind] || { label: e.kind };
       wrap.append(head('item', d.label, fm(e.w) + ' × ' + fm(e.h) + ' m'));
@@ -397,6 +491,38 @@ window.FP = window.FP || {};
       );
       wrap.append(el('div', { class: 'actions' }, btn('Rotate', () => A().rotateSelection(90), '', 'rotate'), dup, del));
     }
+    const grp = M.groupOf(p, sel);
+    if (grp) wrap.append(el('div', { class: 'actions', style: 'margin-top:10px' }, btn('Select ' + grp.name + ' (' + grp.members.length + ' parts)', () => A().selectMany(grp.members), '', 'group')));
+    return wrap;
+  }
+
+  // Several things selected: move, turn, copy, delete or group them as one.
+  const SING = { wall: 'wall', opening: 'door or window', room: 'room', area: 'surface', plant: 'plant', fence: 'fence', gate: 'gate', item: 'furniture piece' };
+  const PLUR = { wall: 'walls', opening: 'doors and windows', room: 'rooms', area: 'surfaces', plant: 'plants', fence: 'fences', gate: 'gates', item: 'furniture pieces' };
+  function multiInspector() {
+    const st = S(), p = P(), refs = st.multi, wrap = el('div');
+    const g = A().isGroupSel();
+    const counts = {};
+    for (const r of refs) counts[r.k] = (counts[r.k] || 0) + 1;
+    wrap.append(head('house', g ? g.name : refs.length + ' things selected', Object.entries(counts).map(([k, n]) => n + ' ' + (n === 1 ? SING[k] : PLUR[k])).join(' · ')));
+    if (g) wrap.append(field('Group name', textInput(g.name, (v) => edit(() => { g.name = v || 'Group'; }))));
+    const mov = refs.filter((r) => M.MOVABLE.includes(r.k));
+    const b = M.selBox(p, mov.length ? mov : refs), c = M.selBox(p, mov.some((r) => r.k === 'wall') ? mov.filter((r) => r.k === 'wall') : mov.length ? mov : refs, true);
+    if (b && c) {
+      wrap.append(
+        el('div', { class: 'row2' },
+          field('Left x', numInput(G.round(c.x0), (v) => edit((q) => M.translateRefs(q, refs, v - c.x0, 0)), { step: 0.05 })),
+          field('Top y', numInput(G.round(c.y0), (v) => edit((q) => M.translateRefs(q, refs, 0, v - c.y0)), { step: 0.05 }))),
+        field('Overall size', el('span', { class: 'ro' }, fm(b.x1 - b.x0) + ' × ' + fm(b.y1 - b.y0) + ' m')));
+    }
+    wrap.append(el('div', { class: 'actions' },
+      g ? btn('Ungroup', () => A().ungroupSelection(), '', 'group') : btn('Group', () => A().groupSelection(), '', 'group'),
+      btn('Rotate 90°', () => A().rotateSelection(90), '', 'rotate'),
+      btn('Duplicate', () => A().duplicate(), '', 'copy'),
+      btn('Delete', () => A().deleteSelection(), 'danger', 'trash')));
+    wrap.append(el('p', { class: 'note', style: 'margin-top:14px' }, g
+      ? 'Drag any part to move the whole group, or type a position. Arrow keys nudge it, [ and ] turn it. Ungroup to work on single parts again, or Shift-click a part to add or remove it.'
+      : 'Drag any highlighted part to move everything together, or type a position. Arrow keys nudge, [ and ] turn. Group (Ctrl+G) keeps these together so one click selects them all. Shift-click adds or removes a thing.'));
     return wrap;
   }
 
@@ -466,6 +592,7 @@ window.FP = window.FP || {};
       field('Lens', selectInput(V.lens(), [['wide', 'Wide, natural edges'], ['normal', 'Normal camera']], (v) => { V.setLens(v); update(true); })),
       field('Size feel', selectInput(String(V.feel()), [['1', 'Exact (1.0×)'], ['1.1', '1.1×'], ['1.2', '1.2× (recommended)'], ['1.3', '1.3×'], ['1.4', '1.4×'], ['1.5', '1.5×']].concat(['1', '1.1', '1.2', '1.3', '1.4', '1.5'].includes(String(V.feel())) ? [] : [[String(V.feel()), V.feel() + '×']]), (v) => V.setFeel(+v))),
       field('Pace', selectInput(String(V.pace()), [['0.9', 'Slow, 0.9 m/s'], ['1.2', 'Stroll, 1.2 m/s'], ['1.5', 'Brisk, 1.5 m/s']].concat(['0.9', '1.2', '1.5'].includes(String(V.pace())) ? [] : [[String(V.pace()), V.pace() + ' m/s']]), (v) => V.setPace(+v))),
+      field('Mouse look speed', selectInput(String(V.look()), [['0.5', 'Slow'], ['0.75', 'Gentle'], ['1', 'Normal'], ['1.5', 'Fast'], ['2', 'Very fast']].concat([['0.5', 'Slow'], ['0.75', 'Gentle'], ['1', 'Normal'], ['1.5', 'Fast'], ['2', 'Very fast']].some((o) => o[0] === String(V.look())) ? [] : [[String(V.look()), V.look() + '×']]), (v) => V.setLook(+v))),
       checkInput('Keep walls upright when looking up or down', V.straight(), (v) => V.setStraight(v)),
       el('p', { class: 'note', style: 'margin:0' }, 'Rooms on a flat screen read about 20% smaller than in person. Size feel makes up for that the way game studios do: the camera is the same as the house built ' +
         'that much larger, while every measurement stays exact. Use 1.0× to see true eye level. The wide lens shows more of the room without stretching the edges. F goes full screen.'));
@@ -485,7 +612,7 @@ window.FP = window.FP || {};
       field('Scroll wheel', selectInput(st.wheel, [['zoom', 'Zooms'], ['pan', 'Pans (pinch zooms)']], (v) => A().setWheel(v)))
     );
     wrap.append(styleSection(), buildingSection(), walkSection());
-    const keys = [['V', 'Select'], ['W', 'Walls'], ['R', 'Rooms'], ['D', 'Doors'], ['N', 'Windows'], ['F', 'Furniture'], ['A', 'Surfaces'], ['T', 'Plants'], ['Space', 'Pan'], ['Scroll', 'Zoom'], ['⌫', 'Delete'], ['⌘D', 'Duplicate'], ['[ ]', 'Rotate'], ['Alt', 'No snap']];
+    const keys = [['V', 'Select'], ['W', 'Walls'], ['R', 'Rooms'], ['D', 'Doors'], ['N', 'Windows'], ['F', 'Furniture'], ['A', 'Surfaces'], ['T', 'Plants'], ['Space', 'Pan'], ['Scroll', 'Zoom'], ['⌫', 'Delete'], ['⌘D', 'Duplicate'], ['Drag box', 'Select many'], ['⌘G', 'Group'], ['⌘A', 'Select all'], ['[ ]', 'Rotate'], ['Alt', 'No snap']];
     wrap.append(el('div', { class: 'sec-title', style: 'margin-top:18px' }, 'Shortcuts'),
       el('div', { class: 'note', style: 'display:grid;grid-template-columns:auto 1fr;gap:4px 12px' }, keys.flatMap(([k, l]) => [el('b', {}, k), el('span', {}, l)])));
     wrap.append(el('p', { class: 'note', style: 'margin-top:16px' }, 'Select anything on the plan to edit it here. Double-click a room to rename it.'));
@@ -537,6 +664,14 @@ window.FP = window.FP || {};
     if (plants.length) wrap.append(el('div', { class: 'sec' }, el('div', { class: 'sec-title' }, 'Planting · ' + s.plantCount),
       el('div', { class: 'list' }, plants.map(([k, n]) => el('div', { class: 'li', style: 'cursor:default' }, el('span', { class: 'n' }, C.plants[k].label), el('span', { class: 'a' }, String(n)))))));
 
+    const fenceRows = Object.entries(s.fences || {});
+    if (fenceRows.length) wrap.append(el('div', { class: 'sec' }, el('div', { class: 'sec-title' }, 'Fencing'),
+      el('div', { class: 'list' }, fenceRows.map(([k, len]) => el('div', { class: 'li', style: 'cursor:default' }, el('span', { class: 'n' }, C.fences[k].label), el('span', { class: 'a' }, fm(len) + ' m'))))));
+
+    const gateRows = Object.entries(s.gates || {});
+    if (gateRows.length) wrap.append(el('div', { class: 'sec' }, el('div', { class: 'sec-title' }, 'Gates'),
+      el('div', { class: 'list' }, gateRows.map(([k, n]) => el('div', { class: 'li', style: 'cursor:default' }, el('span', { class: 'n' }, C.gates[k].label), el('span', { class: 'a' }, String(n)))))));
+
     const ops = s.openings;
     wrap.append(el('div', { class: 'sec' }, el('div', { class: 'sec-title' }, 'Construction'),
       el('div', { class: 'list' },
@@ -551,7 +686,7 @@ window.FP = window.FP || {};
   function layersView() {
     const st = S();
     const wrap = el('div');
-    const rows = [['house', 'House', 'Walls, doors, windows, rooms'], ['furniture', 'Furniture', 'Furniture, fixtures, cars'], ['landscape', 'Landscape', 'Surfaces, trees and plants']];
+    const rows = [['house', 'House', 'Walls, doors, windows, rooms'], ['furniture', 'Furniture', 'Furniture, fixtures, cars'], ['landscape', 'Landscape', 'Surfaces, trees, plants, fences']];
     wrap.append(el('div', { class: 'sec-title' }, 'Layers'));
     for (const [k, name, sub] of rows) {
       const L = st.layers[k];
@@ -848,8 +983,125 @@ window.FP = window.FP || {};
     };
   }
 
+  /* ---------- import a house from another design ---------- */
+  function openImport() {
+    const st = S();
+    if (st.preview) { A().toast('Apply or discard the current suggestion first.'); return; }
+    const lot = P().lot;
+    const d = { id: null, rot: 0, x: 0, y: 0, furniture: true, look: true, text: '', note: '' };
+    let metas = null, src = null, fp = null, doors = [];
+    const err = el('div', { class: 'err-box', hidden: true });
+    const pill = el('span', { class: 'pill' }, 'Checking Claude Code…');
+    const ask = el('button', { class: 'btn' }, el('span', { class: 'i', html: I.sparkle }), 'Ask Claude where');
+    const go = el('button', { class: 'accent-btn' }, 'Preview on plot');
+    const cancel = el('button', { class: 'btn' }, 'Close');
+    const foot = el('span', { class: 'grow' }, 'Nothing is added until you apply the preview.');
+    const ui = { go: ask, err, foot, cancel, running: false, busyLabel: 'Placing…' };
+    const body = el('div', { class: 'body' });
+    const diagram = el('div', { style: 'margin:8px 0 10px' });
+    const size = () => M.turnedSize(fp, d.rot);
+    const fit = () => { const s = size(); d.x = G.round(Math.max(0, Math.min(Math.max(0, lot.w - s.w), d.x)), 2); d.y = G.round(Math.max(0, Math.min(Math.max(0, lot.h - s.h), d.y)), 2); };
+    const fits = () => { const s = size(); return s.w <= lot.w + 1e-6 && s.h <= lot.h + 1e-6; };
+    const centre = () => { const s = size(); d.x = G.round(Math.round((lot.w - s.w) / 2 / 0.05) * 0.05, 2); d.y = G.round(Math.round((lot.h - s.h) / 2 / 0.05) * 0.05, 2); fit(); };
+
+    function drawDiagram() {
+      const p = P();
+      let g = '<rect x="0" y="0" width="' + lot.w + '" height="' + lot.h + '" fill="var(--panel)" stroke="var(--border)" stroke-width=".2"/>';
+      for (const a of p.areas) g += '<polygon points="' + a.pts.map((q) => q.x + ',' + q.y).join(' ') + '" fill="#d8c9a6" opacity=".75"/>';
+      for (const pl of p.plants) g += '<circle cx="' + pl.x + '" cy="' + pl.y + '" r="' + pl.r + '" fill="#9cc47f" opacity=".65"/>';
+      for (const fe of p.fences) g += '<line x1="' + fe.x1 + '" y1="' + fe.y1 + '" x2="' + fe.x2 + '" y2="' + fe.y2 + '" stroke="#8a6a4a" stroke-width=".3"/>';
+      const eh = M.houseFootprint(p);
+      if (eh) g += '<rect x="' + eh.x + '" y="' + eh.y + '" width="' + eh.w + '" height="' + eh.h + '" fill="#8d9096" opacity=".7"/>';
+      if (fp) {
+        const s = size(), t = Math.max(0.6, Math.min(lot.w, lot.h) * 0.025);
+        g += '<rect x="' + d.x + '" y="' + d.y + '" width="' + s.w + '" height="' + s.h + '" fill="var(--accent)" fill-opacity=".28" stroke="var(--accent)" stroke-width=".35"/>';
+        if (doors[0]) {
+          const side = M.turnSide(doors[0], d.rot), L = Math.min(2.4, (side === 'north' || side === 'south' ? s.w : s.h) / 3);
+          const cx = d.x + s.w / 2, cy = d.y + s.h / 2;
+          const r = side === 'north' ? [cx - L / 2, d.y - t / 2, L, t] : side === 'south' ? [cx - L / 2, d.y + s.h - t / 2, L, t] : side === 'west' ? [d.x - t / 2, cy - L / 2, t, L] : [d.x + s.w - t / 2, cy - L / 2, t, L];
+          g += '<rect x="' + r[0] + '" y="' + r[1] + '" width="' + r[2] + '" height="' + r[3] + '" fill="#d9480f"/>';
+        }
+      }
+      diagram.innerHTML = '<svg viewBox="-1 -1 ' + (lot.w + 2) + ' ' + (lot.h + 2) + '" style="width:100%;max-height:280px;display:block;border-radius:8px;background:var(--hover)" aria-label="Plot with the house outline">' + g + '</svg>';
+    }
+
+    async function pick(m) {
+      err.hidden = true;
+      const p = await A().loadDesignProject(m.id);
+      if (!p) { err.hidden = false; err.textContent = 'That design could not be opened.'; return; }
+      const f = M.houseFootprint(p);
+      if (!f) { err.hidden = false; err.textContent = 'That design has no walls or rooms to import.'; return; }
+      src = p; fp = f; d.id = m.id; d.rot = 0; d.note = ''; doors = M.doorSides(p, f);
+      centre();
+      draw();
+    }
+
+    const draw = () => {
+      body.innerHTML = '';
+      body.append(el('p', { class: 'note', style: 'margin:0 0 10px' }, 'Bring a house you designed in another design into this plot. Tell Claude where it goes and which way it faces, or set the spot yourself, then preview it on the plan.'));
+      body.append(el('div', { class: 'sec-title' }, '1 · Choose the house'));
+      if (metas === null) body.append(el('p', { class: 'note' }, 'Loading your designs…'));
+      else if (!metas.length) body.append(el('p', { class: 'note' }, 'You have no other saved designs yet. Designs save automatically: open the house design once, then come back here.'));
+      else body.append(el('div', { class: 'list', style: 'max-height:168px;overflow:auto' }, metas.map((m) => el('button', {
+        class: 'li' + (d.id === m.id ? ' sel' : ''), style: 'width:100%;border:0;background:none;text-align:left;font:inherit;color:inherit', onclick: () => pick(m)
+      }, el('span', { class: 'n' }, m.name || 'Untitled'), el('span', { class: 'a' }, (m.rooms || 0) + ' rooms' + (m.indoor ? ' · ' + (+m.indoor).toFixed(0) + ' m² indoor' : ''))))));
+      if (src) {
+        body.append(el('p', { class: 'note', style: 'margin:8px 0 0' }, 'Footprint ' + fm(fp.w) + ' × ' + fm(fp.h) + ' m, outer wall to outer wall · ' + src.walls.length + ' walls, ' + src.rooms.length + ' rooms' + (doors.length ? ' · entrance on the ' + doors[0] + ' side as drawn' : '')),
+          choice(d, 'furniture', 'Bring its furniture', 'Pieces standing inside or beside the house'),
+          choice(d, 'look', 'Use its house style and roof', 'Applies to the whole design'),
+          el('div', { class: 'sec-title', style: 'margin-top:14px' }, '2 · Place it'),
+          el('textarea', {
+            rows: 3, oninput: (e) => { d.text = e.target.value; },
+            placeholder: 'Tell Claude where, for example: at the back of the plot, centred left to right, 6 m from the back fence, entrance facing the street (south side) so the driveway reaches the front door.'
+          }),
+          el('div', { class: 'actions', style: 'margin:8px 0 0' }, ask, el('span', { class: 'note' }, 'or set the position yourself:')));
+        body.lastChild.previousSibling.value = d.text;
+        if (d.note) body.append(el('p', { class: 'note', style: 'margin:8px 0 0;color:var(--accent)' }, d.note));
+        const onPos = () => { drawDiagram(); };
+        body.append(el('div', { class: 'row2', style: 'margin-top:10px' },
+          field('From west edge', numInput(d.x, (v) => { d.x = v; fit(); onPos(); }, { step: 0.1, min: 0 })),
+          field('From north edge', numInput(d.y, (v) => { d.y = v; fit(); onPos(); }, { step: 0.1, min: 0 }))));
+        body.append(field('Turn', selectInput(d.rot, [[0, 'As drawn'], [90, '90° clockwise'], [180, '180°'], [270, '270° clockwise']], (v) => { d.rot = +v; fit(); draw(); })));
+        body.append(diagram, el('p', { class: 'note', style: 'margin:0' }, 'Blue outline = the house · grey = what is already built · red bar = its entrance. Plants where the house lands are removed.'));
+        if (!fits()) body.append(el('p', { class: 'err-box' }, 'At this rotation the house (' + fm(size().w) + ' × ' + fm(size().h) + ' m) is bigger than the plot (' + fm(lot.w) + ' × ' + fm(lot.h) + ' m). Try another turn.'));
+        drawDiagram();
+      }
+      body.append(modelPicker(), err);
+      go.disabled = !src || !fits();
+    };
+
+    const modal = el('div', { class: 'modal', role: 'dialog', 'aria-label': 'Import a house' },
+      el('header', {}, el('span', { class: 'i', html: I.house, style: 'color:var(--accent)' }), el('h2', {}, 'Import a house'), pill),
+      body, el('footer', {}, foot, cancel, go));
+    draw();
+    openModal(modal, () => ui.running);
+    statusPill(pill, ask, err);
+    A().listDesigns().then((list) => { metas = (list || []).filter((m) => m.id !== st.designId); draw(); });
+    cancel.onclick = () => { if (ui.running) window.api.claudeCancel(); else closeModal(); };
+
+    ask.onclick = async () => {
+      if (!src) { err.hidden = false; err.textContent = 'Choose a house first.'; return; }
+      if (d.text.trim().length < 3) { err.hidden = false; err.textContent = 'Say where it should go first, for example: "at the back of the plot, centred".'; return; }
+      const res = await runJob(FP.claude.buildPlaceRequest(P(), src, { instruction: d.text.trim() }), ui);
+      if (!res) return;
+      const r = FP.claude.placement(P(), src, res.data);
+      d.x = r.x; d.y = r.y; d.rot = r.rot; d.note = r.note;
+      draw();
+    };
+    go.onclick = () => {
+      if (!src || !fits()) return;
+      fit();
+      const next = JSON.parse(JSON.stringify(P()));
+      const r = M.importHouse(next, src, { x: d.x, y: d.y, rot: d.rot, furniture: d.furniture, look: d.look });
+      closeModal();
+      const sum = 'Adds ' + (src.name || 'the house') + ': ' + r.walls + ' walls, ' + r.rooms + ' rooms' + (r.items ? ', ' + r.items + ' pieces of furniture' : '') + ' at ' + fm(d.x) + ' m from the west and ' + fm(d.y) + ' m from the north edge' + (d.rot ? ', turned ' + d.rot + '° clockwise' : '') + '.' + (r.plantsRemoved ? ' Removes ' + r.plantsRemoved + ' plant' + (r.plantsRemoved === 1 ? '' : 's') + ' where it stands.' : '') + (d.note ? ' ' + d.note : '');
+      A().propose(M.normalize(next), sum, 'Imported house');
+      A().setMode('plan');
+    };
+  }
+
   /* ---------- suggestion preview ---------- */
-  const DIFF_LABEL = { rooms: 'Rooms', walls: 'Walls', openings: 'Doors & windows', items: 'Furniture', areas: 'Surfaces', plants: 'Plants' };
+  const DIFF_LABEL = { gates: 'Gates', rooms: 'Rooms', walls: 'Walls', openings: 'Doors & windows', items: 'Furniture', areas: 'Surfaces', plants: 'Plants', fences: 'Fences' };
 
   function suggestionBar() {
     const st = S(), pv = st.preview, bar = $('optbar');
@@ -890,5 +1142,5 @@ window.FP = window.FP || {};
     return wrap;
   }
 
-  FP.panels = { buildRail, bindTabs, updateTool, update, showTab, focusFirstField, openStart, openAsk, closeModal, buildDrawer };
+  FP.panels = { buildRail, bindTabs, updateTool, update, showTab, focusFirstField, openStart, openAsk, openImport, closeModal, buildDrawer };
 })();

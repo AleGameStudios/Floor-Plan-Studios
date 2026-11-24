@@ -19,3 +19,18 @@ my-data/*
 Thumbs.db
 .vscode/
 .idea/
+
+# Claude account, Claude Code and local app settings: never commit these.
+# (The app keeps its own settings in the OS user-data folder, outside the repo; the Claude login lives
+# in the Claude Code CLI's own folder in your home directory.)
+.claude/
+.claude.json
+CLAUDE.local.md
+.credentials.json
+credentials.json
+auth.json
+/settings.json
+/preferences.json
+settings.local.json
+*.pem
+*.key
