@@ -34,6 +34,64 @@
 - **Autosave and undo** – designs save themselves as you work; up to 200 undo steps.
 - **Light and dark themes**, or follow the system.
 
+## Set up and first run (start here)
+
+No coding is needed. You do the setup once, and it takes about ten minutes.
+
+### 1. Get the app
+
+On this page, click the green **Code** button, then **Download ZIP**, and unzip it somewhere easy such as your Documents folder. If you use Git, `git clone https://github.com/AleGameStudios/Floor-Plan-Studios.git` does the same.
+
+### 2. Install Node.js (once)
+
+Download the **LTS** version from [nodejs.org](https://nodejs.org) and run the installer with the default options. Node.js is what builds and starts the app. If you had a terminal window open, close it so it picks up the new install.
+
+### 3. Start the app
+
+- **Windows:** double-click **`Run-App.bat`** in the app folder. The first time it downloads what it needs (a few minutes), then Floorplan Studio opens. Next time it opens straight away.
+- **Mac / Linux:** open a terminal in the app folder and run `npm install`, then `npm start`.
+- **Want a normal installed app with a Start-menu icon (Windows)?** Double-click **`Build-and-Install.bat`** instead. It builds the installer and runs it. Windows SmartScreen may warn that the installer is unsigned: choose **More info, then Run anyway**.
+
+Everything except the Claude features works at this point. You can draw, walk through in 3D and export without signing in to anything.
+
+### 4. Connect Claude (optional, for the AI features)
+
+The Chat and Ask Claude buttons use the **Claude Code** program on your computer and your own **Claude subscription (Pro or Max)**. Floorplan Studio never asks for, stores or sends your password or an API key.
+
+1. **Install Claude Code.** Follow the steps at [claude.com/claude-code](https://claude.com/claude-code). If you already have Node.js, this also works from a Command Prompt: `npm install -g @anthropic-ai/claude-code`.
+2. **Restart Floorplan Studio** so it can find it.
+3. In the app, click **Chat** (top right). If you are not signed in yet, you will see a **Sign in with Claude** button. Click it.
+4. Your browser opens the Claude sign-in page. Choose your Claude account and approve. When the browser says you are done, switch back to the app. The chat is ready.
+
+Good to know:
+
+- Your sign-in is kept by Claude Code in its own folder in your user profile. It is not inside this project, and the repository's `.gitignore` keeps settings and credentials out of Git, so you cannot publish them by accident.
+- Only a **Claude subscription** login is used. If Claude Code is signed in with an API key (billed per use), the app tells you and will not use it. Sign out of that and sign in with your Claude account instead.
+- If the app says **Claude Code was not found**, check that it is installed (open a Command Prompt, type `claude --version`), then restart the app. If it says **not signed in**, use the **Sign in with Claude** button, then **Check again**.
+- Claude only ever **suggests** changes. You see a Current / Suggestion preview and choose to apply it or discard it. Applying is one undo step.
+
+### 5. Use the app
+
+1. **Home screen:** start a new design (**Start from scratch**, **Describe it** to Claude, or **From a floor-plan image**), open the sample house, or reopen a saved design. Your work saves itself as you go.
+2. **Set the plot:** click the empty ground, then set the lot width and depth in the panel on the right.
+3. **Draw the house:** the left rail has the tools. Walls (**W**), Rooms (**R**), Doors (**D**) and Windows (**N**). Click to place, drag to move, and the panel on the right shows the exact sizes you can type in.
+4. **Furnish and landscape:** Furniture (**F**), Backyard (**P**: pools, quincho, soccer and basketball courts), Ground surfaces (**A**: lawn, paths, roads), Plants (**T**), Fences (**G**) and Gates (**J**).
+5. **Select, group and move:** drag a box on empty ground to select many things. Press **Ctrl+G** to group them, then drag to move a whole house. **Ctrl+Z** undoes anything.
+6. **Measure:** Distance (**M**), Laser gap (**L**) and Area (**Z**) show real sizes. The **Areas** tab in the right panel shows each room's m², lot coverage and more.
+7. **See it:** the **Plan**, **Render** and **3D** buttons at the top switch views. **Walk** puts you inside the house in first person: W A S D to move, the mouse to look, Shift to run, Esc to let go of the mouse, Esc again to leave.
+8. **Ask Claude:** **Ask Claude** designs a layout, furnishes or landscapes, or changes the plan in plain English. **Chat** answers questions and makes edits as you talk. **Import house** brings a house from another saved design onto this plot, and Claude can place it where you describe.
+9. **Export:** the **Export** button saves the plan as a PNG or SVG.
+
+### If something goes wrong
+
+| Problem | What to do |
+| --- | --- |
+| `Run-App.bat` says Node.js is needed | Install Node.js LTS (step 2), close the window and run it again. |
+| The first start fails while downloading | Check your internet connection and run `Run-App.bat` again. |
+| The Chat button says Claude Code was not found | Install Claude Code (step 4), then restart the app. |
+| The sign-in page does not open | In the chat, click **Open sign-in page**. |
+| The mouse feels too fast or too slow in Walk mode | Select nothing, open the Walkthrough section in the right panel and change **Mouse look speed**. |
+
 ## Tech stack
 
 | Layer | Technology |
@@ -51,7 +109,7 @@ No front-end framework and no bundler: the renderer is a set of plain scripts sh
 ### Requirements
 
 - Node.js 18+ and npm
-- Optional, for the Claude features: [Claude Code](https://claude.com/claude-code) installed and signed in (`claude auth login`). Everything else works without it.
+- Optional, for the Claude features: [Claude Code](https://claude.com/claude-code) installed and a Claude Pro or Max account. Sign in from the app's Chat panel (see [Set up and first run](#set-up-and-first-run-start-here)). Everything else works without it.
 
 ### Run from source
 
